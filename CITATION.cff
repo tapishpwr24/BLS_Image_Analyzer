@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use BLS Image Analyzer in your research, please cite this software."
+title: "BLS Image Analyzer"
+type: software
+
+authors:
+  - family-names: "Pawar"
+    given-names: "Tapish"
+
+version: "1.0.0"
+
+date-released: "2026-08-23"
+
+abstract: >-
+  BLS Image Analyzer is an R-based image phenotyping pipeline
+  for semi-automated assessment of bacterial leaf streak symptoms
+  from leaf images. The software performs leaf segmentation,
+  RGB-to-HSV color analysis, pixel-based classification of healthy,
+  chlorotic, and necrotic tissue, estimation of diseased leaf area,
+  and conversion of image-derived disease severity to a 1-9 rating.
+  It also generates classification overlays, diagnostic figures,
+  tabular outputs, and compiled PDF reports.
+
+keywords:
+  - bacterial leaf streak
+  - BLS
+  - image phenotyping
+  - plant disease
+  - wheat
+  - image analysis
+  - disease severity
+  - R
+  - plant pathology
+
+license: MIT
+
+repository-code: "https://github.com/tapishpwr24/BLS_Image_Analyzer"
