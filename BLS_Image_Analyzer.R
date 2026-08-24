@@ -326,32 +326,32 @@ compute_bls_score <- function(
 
 
 ############################################################
-# 5. SCORE CATEGORY
+# 5. DISEASE-RESPONSE CATEGORY
 ############################################################
 
 score_category <- function(score) {
   
   if (is.na(score)) {
-    
     return(NA_character_)
-    
   }
   
-  if (score <= 3) {
+  if (score < 3) {
     
-    "Low"
+    return("Resistant")
     
-  } else if (score <= 6) {
+  } else if (score < 5) {
     
-    "Moderate"
+    return("Moderately Resistant")
+    
+  } else if (score < 7) {
+    
+    return("Moderately Susceptible")
     
   } else {
     
-    "High"
-    
+    return("Highly Susceptible")
   }
 }
-
 
 ############################################################
 # 6. CORE IMAGE ANALYSIS
@@ -1662,7 +1662,7 @@ for (i in seq_along(image_files)) {
         
         BLS_Score = NA,
         
-        Category = NA,
+        Disease_Response = NA,
         
         QC_Status = "FAILED",
         
@@ -1828,7 +1828,7 @@ for (i in seq_along(image_files)) {
       BLS_Score =
         res$score,
       
-      Category =
+      Disease_Response =
         score_category(
           res$score
         ),
@@ -2094,9 +2094,21 @@ score_scale <- data.frame(
       ">40-60",
       ">60-75",
       ">75"
+    ),
+  
+  Disease_Response =
+    c(
+      "Resistant",
+      "Resistant",
+      "Moderately Resistant",
+      "Moderately Resistant",
+      "Moderately Susceptible",
+      "Moderately Susceptible",
+      "Highly Susceptible",
+      "Highly Susceptible",
+      "Highly Susceptible"
     )
 )
-
 
 addWorksheet(
   wb,
@@ -2116,7 +2128,7 @@ addStyle(
   "BLS_Score_Scale",
   header_style,
   rows = 1,
-  cols = 1:2,
+  cols = 1:3,
   gridExpand = TRUE
 )
 
@@ -2124,7 +2136,7 @@ addStyle(
 setColWidths(
   wb,
   "BLS_Score_Scale",
-  cols = 1:2,
+  cols = 1:3,
   widths = 25
 )
 
@@ -2267,6 +2279,7 @@ print(
       "Necrotic_Percent",
       "Total_Diseased_Percent",
       "BLS_Score",
+      "Disease_Response",
       "QC_Status"
     )
   ]

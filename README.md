@@ -4,7 +4,7 @@
 
 The pipeline separates leaf tissue from a dark background, converts RGB image information to HSV color space, classifies detected leaf pixels into **healthy, chlorotic, and necrotic tissue**, quantifies symptomatic leaf area, and converts image-derived disease severity into a **1–9 BLS rating**.
 
-BLS Image Analyzer also generates color-coded classification overlays, diagnostic figures, CSV and Excel results, individual image panels, and a compiled PDF report.
+The resulting BLS ratings are further grouped into **Resistant, Moderately Resistant, Moderately Susceptible, and Highly Susceptible** disease-response categories.
 
 ---
 
@@ -23,6 +23,7 @@ BLS Image Analyzer provides:
 - Estimation of necrotic leaf area (%)
 - Calculation of total diseased leaf area (%)
 - Conversion of image-derived disease severity to a 1–9 BLS rating
+- Classification of BLS ratings into disease-response categories
 - Green/yellow/red classification overlays
 - Diagnostic plots for evaluating image classification
 - Batch processing of multiple images
@@ -486,7 +487,7 @@ Variables include:
 - `Necrotic_Percent`
 - `Total_Diseased_Percent`
 - `BLS_Score`
-- `Disease_Category`
+- `Disease_Response`
 - `QC_Status`
 - Output-file locations
 
@@ -521,7 +522,19 @@ Contains overall summary statistics, including:
 
 ### BLS_Score_Scale
 
-Contains the disease-percentage intervals used to generate the 1–9 BLS rating.
+Contains the disease-percentage intervals used to generate the 1–9 BLS rating and the corresponding disease-response categories.
+
+| BLS score | Diseased leaf area (%) | Disease response |
+|---:|---:|---|
+| 1 | 0–0.5 | Resistant |
+| 2 | >0.5–2 | Resistant |
+| 3 | >2–6 | Moderately Resistant |
+| 4 | >6–12 | Moderately Resistant |
+| 5 | >12–25 | Moderately Susceptible |
+| 6 | >25–40 | Moderately Susceptible |
+| 7 | >40–60 | Highly Susceptible |
+| 8 | >60–75 | Highly Susceptible |
+| 9 | >75 | Highly Susceptible |
 
 ---
 
@@ -551,35 +564,6 @@ FAILED
 ```
 
 Users should also visually inspect classification overlays and diagnostic figures before using image-derived measurements for downstream quantitative analyses.
-
----
-
-# Classification Parameters
-
-Image classification is controlled by RGB and HSV thresholds defined near the beginning of `BLS_Image_Analyzer.R`.
-
-The principal configurable parameters include:
-
-| Parameter | Default |
-|---|---:|
-| Leaf RGB sum threshold | 0.20 |
-| Necrotic H minimum | 0.02 |
-| Necrotic H maximum | 0.10 |
-| Necrotic S minimum | 0.15 |
-| Necrotic V minimum | 0.10 |
-| Necrotic V maximum | 0.50 |
-| Chlorotic H minimum | 0.10 |
-| Chlorotic H maximum | 0.24 |
-| Chlorotic V minimum | 0.28 |
-| Overlay alpha | 0.45 |
-
-Additional RGB relationships are implemented in the classification function.
-
-Detailed information about the classification and scoring procedure is provided in:
-
-```text
-docs/scoring_method.md
-```
 
 ---
 
@@ -620,20 +604,18 @@ Retaining both measurements allows users to work with the continuous image-deriv
 
 ---
 
-# Disease Categories
+## Disease-Response Categories
 
-For convenient interpretation, BLS scores are additionally grouped into descriptive categories:
+Image-derived BLS scores are grouped into four disease-response categories:
 
-| BLS score | Disease category |
+| BLS score | Disease-response category |
 |---:|---|
-| 1 | Resistant |
-| 2–3 | Moderately Resistant |
-| 4–5 | Moderately Susceptible |
-| 6–7 | Susceptible |
-| 8–9 | Highly Susceptible |
+| 1–<3 | Resistant |
+| 3–<5 | Moderately Resistant |
+| 5–<7 | Moderately Susceptible |
+| 7–9 | Highly Susceptible |
 
-These categories are secondary interpretations of the image-derived BLS score.
-
+These categories provide a simplified interpretation of the image-derived 1–9 BLS rating.
 ---
 
 # Reproducibility
