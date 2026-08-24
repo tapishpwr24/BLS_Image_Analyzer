@@ -443,6 +443,9 @@ The figure title additionally reports:
 
 Visual inspection of these diagnostic figures is recommended as part of quality control.
 
+### BLS_Score_Scale
+
+Contains the 1–9 BLS scoring intervals and corresponding disease-response categories used by the analyzer. See the **BLS Rating Scale** and **Disease-Response Categories** sections above for interpretation.
 ---
 
 ## 06_compiled_reports
@@ -519,22 +522,6 @@ Contains overall summary statistics, including:
 - Median BLS score
 - Minimum BLS score
 - Maximum BLS score
-
-### BLS_Score_Scale
-
-Contains the disease-percentage intervals used to generate the 1–9 BLS rating and the corresponding disease-response categories.
-
-| BLS score | Diseased leaf area (%) | Disease response |
-|---:|---:|---|
-| 1 | 0–0.5 | Resistant |
-| 2 | >0.5–2 | Resistant |
-| 3 | >2–6 | Moderately Resistant |
-| 4 | >6–12 | Moderately Resistant |
-| 5 | >12–25 | Moderately Susceptible |
-| 6 | >25–40 | Moderately Susceptible |
-| 7 | >40–60 | Highly Susceptible |
-| 8 | >60–75 | Highly Susceptible |
-| 9 | >75 | Highly Susceptible |
 
 ---
 
