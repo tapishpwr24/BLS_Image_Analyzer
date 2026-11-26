@@ -6,7 +6,7 @@
 <title>BLS Leaf Scorer</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Photograph a leaf, get its BLS score and diseased leaf area, and save it to your own storage.">
-<meta name="theme-color" content="#16301f">
+<meta name="theme-color" content="#14281b">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,18 +18,22 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: one-column field tool, bottom tab bar (Analyze / Records / Settings), content capped at 560px. */
+/* Layout: single column (max 560px) for one-handed field use; dark "black board" capture panel,
+   light result cards, floating tab bar at the thumb. */
 :root {
-  --bg: #f3f5ef;
+  --bg: #eef2ea;
   --surface: #ffffff;
-  --surface-2: #e8ece3;
-  --line: #d3d9cc;
-  --ink: #142019;
-  --ink-2: #4f5d53;
-  --accent: #1d5c3c;
+  --surface-2: #e4eadf;
+  --line: #d2dacb;
+  --ink: #122017;
+  --ink-2: #546357;
+  --accent: #1c5a3a;
   --accent-ink: #ffffff;
-  --board: #16301f;
-  --board-ink: #eef3ea;
+  --board: #14281b;
+  --board-2: #1d3826;
+  --board-ink: #eef4ec;
+  --board-ink-2: #a9c4b0;
+  --leaf: #8fd19e;
   --healthy: #2f8f46;
   --chlorotic: #d9a400;
   --necrotic: #b4441c;
@@ -37,234 +41,305 @@
   --warn-ink: #6b4e00;
   --s1: #2f8f46; --s2: #4c9a3d; --s3: #7aa534; --s4: #a6a92c; --s5: #cfa024;
   --s6: #d98420; --s7: #c9611e; --s8: #b4441c; --s9: #8f2a16;
+  --shadow: 0 1px 2px rgba(18,32,23,0.06), 0 6px 20px rgba(18,32,23,0.07);
   --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --radius: 14px;
-  --tabbar-h: 64px;
+  --radius: 18px;
+  --tabbar-h: 66px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1511; --surface: #18201b; --surface-2: #222c25; --line: #2f3b33;
-    --ink: #e7eee8; --ink-2: #9faea3; --accent: #6cc58f; --accent-ink: #0b1a10;
-    --board: #1b2e21; --board-ink: #e7eee8;
+    --bg: #0d1410; --surface: #162019; --surface-2: #1f2b23; --line: #2c3a30;
+    --ink: #e6eee7; --ink-2: #9cada0; --accent: #6cc58f; --accent-ink: #0b1a10;
+    --board: #18301f; --board-2: #213d2a; --board-ink: #e6eee7; --board-ink-2: #9fbca7;
     --healthy: #5cc074; --chlorotic: #f0c330; --necrotic: #e2683c;
     --warn-bg: #3a2f12; --warn-ink: #f3d68a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.25);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1511; --surface: #18201b; --surface-2: #222c25; --line: #2f3b33;
-  --ink: #e7eee8; --ink-2: #9faea3; --accent: #6cc58f; --accent-ink: #0b1a10;
-  --board: #1b2e21; --board-ink: #e7eee8;
+  --bg: #0d1410; --surface: #162019; --surface-2: #1f2b23; --line: #2c3a30;
+  --ink: #e6eee7; --ink-2: #9cada0; --accent: #6cc58f; --accent-ink: #0b1a10;
+  --board: #18301f; --board-2: #213d2a; --board-ink: #e6eee7; --board-ink-2: #9fbca7;
   --healthy: #5cc074; --chlorotic: #f0c330; --necrotic: #e2683c;
   --warn-bg: #3a2f12; --warn-ink: #f3d68a;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px rgba(0,0,0,0.25);
   color-scheme: dark;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; }
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font: 400 15px/1.5 var(--font-body);
-  -webkit-font-smoothing: antialiased;
-}
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--font-body); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
 img { max-width: 100%; display: block; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
-body::before {
-  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
-  z-index: 10; background: var(--board);
-}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--board); }
+
+/* ---------- top bar ---------- */
 .topbar {
-  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9;
-  background: var(--board); color: var(--board-ink);
-  padding-block: 12px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9; background: var(--board); color: var(--board-ink);
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
-.topbar-inner { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
-.brand { font: 800 19px/1 var(--font-display); font-stretch: 85%; letter-spacing: 0.01em; margin: 0; }
-.brand small { display: block; font: 500 11px/1.3 var(--font-data); letter-spacing: 0.06em; opacity: 0.7; margin-top: 3px; text-transform: uppercase; }
+.topbar-inner { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+.logo { width: 34px; height: 34px; border-radius: 10px; flex: none; }
+.brand { margin: 0; display: grid; gap: 1px; min-width: 0; }
+.brand b { font: 800 18px/1.1 var(--font-display); font-stretch: 85%; letter-spacing: 0.01em; }
+.brand span { font: 500 11px/1.2 var(--font-data); color: var(--board-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sync-pill {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-  font: 500 12px/1 var(--font-data); padding: 7px 10px; border-radius: 999px;
-  background: rgba(255,255,255,0.1); color: var(--board-ink); border: 0; cursor: pointer;
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px; flex: none;
+  font: 500 12px/1 var(--font-data); padding: 8px 11px; border-radius: 999px;
+  background: rgba(255,255,255,0.08); color: var(--board-ink); border: 1px solid rgba(255,255,255,0.12); cursor: pointer;
 }
-.sync-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #8fd19e; }
-.sync-pill[data-state="pending"] .dot { background: #f0c330; }
-.sync-pill[data-state="error"] .dot { background: #ff7a59; }
+.sync-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); box-shadow: 0 0 0 3px rgba(143,209,158,0.2); }
+.sync-pill[data-state="pending"] .dot { background: #f0c330; box-shadow: 0 0 0 3px rgba(240,195,48,0.2); }
+.sync-pill[data-state="error"] .dot { background: #ff7a59; box-shadow: 0 0 0 3px rgba(255,122,89,0.2); }
 
 main {
   max-width: 560px; margin: 0 auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
-  padding-block: 18px calc(var(--tabbar-h) + 32px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px calc(var(--tabbar-h) + 40px + env(safe-area-inset-bottom, 0px));
 }
-.view { display: grid; gap: 16px; }
+.view { display: grid; gap: 14px; }
 
-h2 { font: 700 22px/1.2 var(--font-display); font-stretch: 90%; margin: 0; text-wrap: balance; }
-h3 { font: 700 15px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; }
-.eyebrow { font: 500 11px/1 var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); }
+h2 { font: 800 24px/1.15 var(--font-display); font-stretch: 88%; margin: 0; text-wrap: balance; letter-spacing: -0.005em; }
+h3 { font: 700 16px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; }
+.eyebrow { font: 500 11px/1 var(--font-data); text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-2); }
 .muted { color: var(--ink-2); }
 .small { font-size: 13px; }
 .num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.card { background: var(--surface); border-radius: var(--radius); padding: 18px; display: grid; gap: 14px; min-width: 0; box-shadow: var(--shadow); }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 14px; min-width: 0; }
-
-/* Capture */
-.capture {
-  background: var(--board); color: var(--board-ink); border-radius: var(--radius);
-  padding: 20px; display: grid; gap: 16px;
-}
-.capture h2 { color: var(--board-ink); }
-.capture-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+/* ---------- buttons ---------- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 48px; padding: 0 18px; border-radius: 12px; border: 1px solid transparent;
+  min-height: 50px; padding: 0 18px; border-radius: 14px; border: 1px solid transparent;
   font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: transform 0.12s ease, background-color 0.15s ease;
 }
+.btn:active { transform: scale(0.97); }
 .btn svg { width: 20px; height: 20px; flex: none; }
 .btn-primary { background: var(--accent); color: var(--accent-ink); }
-.capture .btn-primary { background: #e9f5ec; color: #12301e; }
 .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink); }
-.capture .btn-ghost { border-color: rgba(255,255,255,0.25); color: var(--board-ink); }
-.btn-block { width: 100%; }
+.btn-soft { background: var(--surface-2); color: var(--ink); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.tips { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; opacity: 0.85; }
-.tips li { display: flex; gap: 8px; align-items: baseline; }
-.tips li::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: #8fd19e; flex: none; transform: translateY(-1px); }
-.sample-link { background: none; border: 0; padding: 0; color: #b9e3c4; text-decoration: underline; cursor: pointer; font-size: 13px; justify-self: start; }
+.link-btn { background: none; border: 0; padding: 6px 2px; color: var(--accent); font-weight: 600; cursor: pointer; font-size: 14px; flex: none; }
 
-/* Result */
-.result-head { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; }
-.score-badge {
-  width: 92px; height: 92px; border-radius: 20px; display: grid; place-items: center; align-content: center;
-  color: #fff; background: var(--s5);
+/* ---------- capture ---------- */
+.capture {
+  background: radial-gradient(120% 90% at 85% 0%, var(--board-2) 0%, var(--board) 60%);
+  color: var(--board-ink); border-radius: 22px; padding: 20px; display: grid; gap: 18px; box-shadow: var(--shadow);
 }
-.score-badge .big { font: 800 46px/0.9 var(--font-display); font-stretch: 80%; }
-.score-badge .lbl { font: 500 10px/1 var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.9; margin-top: 4px; }
+.capture-top { display: grid; grid-template-columns: 1fr 96px; gap: 14px; align-items: center; }
+.capture .eyebrow { color: var(--leaf); }
+.capture h2 { color: var(--board-ink); margin-top: 6px; }
+.finder { width: 96px; height: 120px; }
+.capture-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.btn-camera { background: var(--board-ink); color: #10251a; min-height: 58px; font-size: 17px; border-radius: 16px; }
+.btn-camera svg { width: 24px; height: 24px; }
+.btn-gallery { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); color: var(--board-ink); min-height: 58px; border-radius: 16px; }
+.tips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.tips li { display: grid; gap: 6px; justify-items: center; text-align: center; font-size: 12px; line-height: 1.3; color: var(--board-ink-2); padding: 10px 6px; border-radius: 12px; background: rgba(255,255,255,0.05); }
+.tips svg { width: 22px; height: 22px; color: var(--leaf); }
+.sample-link { background: none; border: 0; padding: 0; color: var(--board-ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 13px; justify-self: center; }
+
+/* ---------- install ---------- */
+.install { display: grid; grid-template-columns: 46px 1fr; gap: 12px; align-items: start; }
+.install img { width: 46px; height: 46px; border-radius: 12px; }
+.install-steps { margin: 8px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+.install-actions { display: flex; gap: 8px; flex-wrap: wrap; grid-column: 1 / -1; }
+.install-actions .btn { min-height: 44px; }
+.share-ico { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; }
+
+/* ---------- busy / error ---------- */
+.busy { display: flex; gap: 14px; align-items: center; }
+.spinner { width: 30px; height: 30px; border: 3px solid var(--surface-2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-card { border: 1px solid var(--necrotic); }
+
+/* ---------- result ---------- */
+.result-card { gap: 18px; }
+.result-head { display: grid; grid-template-columns: 132px 1fr; gap: 16px; align-items: center; }
+.gauge { position: relative; width: 132px; height: 132px; }
+.gauge svg { width: 132px; height: 132px; transform: rotate(-90deg); }
+.gauge .track { stroke: var(--surface-2); }
+.gauge .arc { transition: stroke-dashoffset 0.9s cubic-bezier(.2,.8,.2,1), stroke 0.3s; }
+.gauge-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.gauge-center .big { font: 800 52px/0.9 var(--font-display); font-stretch: 78%; }
+.gauge-center .lbl { font: 500 10px/1 var(--font-data); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); margin-top: 4px; }
 .result-title { display: grid; gap: 6px; min-width: 0; }
-.diseased { font: 700 28px/1 var(--font-display); font-stretch: 90%; }
-.diseased span { font: 500 13px var(--font-body); color: var(--ink-2); }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); justify-self: start; }
-.chip .sw { width: 8px; height: 8px; border-radius: 50%; }
-.qc-warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.diseased { font: 800 34px/1 var(--font-display); font-stretch: 85%; }
+.diseased-sub { font-size: 13px; color: var(--ink-2); margin-top: -2px; }
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--surface-2); justify-self: start; }
+.chip .sw { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.qc-warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+
+.comp { display: grid; gap: 10px; }
+.comp-bar { display: flex; height: 14px; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.comp-bar i { display: block; height: 100%; transition: width 0.8s cubic-bezier(.2,.8,.2,1); }
+.comp-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.comp-legend div { display: grid; gap: 2px; }
+.comp-legend span { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.comp-legend .sw { width: 9px; height: 9px; border-radius: 3px; }
+.comp-legend b { font: 500 17px var(--font-data); font-variant-numeric: tabular-nums; }
 
 .scale { display: grid; gap: 6px; }
-.scale-bar { position: relative; display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; height: 26px; }
-.scale-bar div { border-radius: 4px; display: grid; place-items: center; font: 500 11px var(--font-data); color: #fff; opacity: 0.35; }
-.scale-bar div.on { opacity: 1; outline: 2px solid var(--ink); outline-offset: 1px; }
+.scale-bar { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; height: 28px; }
+.scale-bar div { border-radius: 6px; display: grid; place-items: center; font: 500 11px var(--font-data); color: #fff; opacity: 0.3; transition: opacity 0.3s, transform 0.3s; }
+.scale-bar div.on { opacity: 1; transform: scaleY(1.18); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
 .scale-ticks { display: grid; grid-template-columns: repeat(9, 1fr); font: 500 10px var(--font-data); color: var(--ink-2); text-align: center; }
 
-.tissue { display: grid; gap: 10px; }
-.tissue-row { display: grid; grid-template-columns: 92px 1fr 64px; gap: 10px; align-items: center; font-size: 14px; }
-.tissue-row .bar { height: 10px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
-.tissue-row .bar i { display: block; height: 100%; border-radius: 6px; }
-.tissue-row .val { text-align: right; }
-.tissue-row .name { display: flex; align-items: center; gap: 8px; }
-
 .viewer { display: grid; gap: 10px; }
-.seg { display: inline-grid; grid-auto-flow: column; background: var(--surface-2); border-radius: 10px; padding: 3px; justify-self: start; }
-.seg button { border: 0; background: transparent; padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2); }
-.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
-.leaf-frame { background: #000; border-radius: 10px; overflow: auto; max-height: 420px; display: flex; justify-content: center; }
+.viewer-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-grid; grid-auto-flow: column; background: var(--surface-2); border-radius: 12px; padding: 3px; }
+.seg button { border: 0; background: transparent; padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+.leaf-frame { background: #000; border-radius: 14px; overflow: auto; max-height: 420px; display: flex; justify-content: center; }
 .leaf-frame canvas { display: block; max-width: 100%; height: auto; }
 .leaf-frame.tall canvas { height: 400px; width: auto; max-width: none; }
 .leaf-frame.rot { justify-content: flex-start; }
 .leaf-frame.rot canvas { height: 150px; width: auto; max-width: none; }
 
-/* Forms */
-.form { display: grid; gap: 12px; }
+/* ---------- form ---------- */
+.form { display: grid; gap: 14px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.field { display: grid; gap: 5px; min-width: 0; }
-.field label { font-size: 13px; font-weight: 600; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field label, .field .label { font-size: 13px; font-weight: 600; }
 .field .hint { font-size: 12px; color: var(--ink-2); }
-input[type="text"], input[type="url"], input[type="number"], input[type="password"], select, textarea {
-  width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 10px;
-  border: 1px solid var(--line); background: var(--bg);
+input[type="text"], input[type="url"], input[type="number"], input[type="password"], input[type="search"], select, textarea {
+  width: 100%; min-height: 48px; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,122,80,0.22); }
+.input-lg { font-size: 18px !important; font-weight: 600; min-height: 54px !important; }
 textarea { min-height: 70px; resize: vertical; }
+.stepper { display: grid; grid-template-columns: 48px 1fr 48px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.stepper button { border: 0; background: var(--surface-2); font-size: 22px; font-weight: 600; cursor: pointer; min-height: 48px; }
+.stepper button:active { background: var(--line); }
+.stepper input { border: 0 !important; border-radius: 0 !important; text-align: center; font: 600 18px var(--font-data) !important; background: transparent !important; box-shadow: none !important; -moz-appearance: textfield; min-width: 0; }
+.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.context-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 12px; background: var(--surface-2); border-radius: 12px; font-size: 13px; }
+.context-line span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .check { display: flex; gap: 10px; align-items: center; font-size: 14px; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.save-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 
-/* Records */
+/* ---------- saved ---------- */
+.saved { text-align: center; justify-items: center; gap: 12px; padding: 26px 18px; }
+.saved-check { width: 64px; height: 64px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; }
+.saved-check svg { width: 34px; height: 34px; color: var(--healthy); }
+.saved-check path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: draw 0.45s 0.1s ease forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.saved-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; width: 100%; }
+
+/* ---------- records ---------- */
+.filters { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.filters select { width: auto; max-width: 160px; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 2px; }
-.stat b { font: 700 24px/1.1 var(--font-display); font-stretch: 90%; }
-.hist { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; align-items: end; height: 90px; }
-.hist div { display: grid; align-content: end; gap: 3px; text-align: center; height: 100%; }
-.hist i { display: block; border-radius: 4px 4px 2px 2px; min-height: 2px; }
+.stat { background: var(--surface); border-radius: 16px; padding: 12px 14px; display: grid; gap: 4px; box-shadow: var(--shadow); min-width: 0; }
+.stat b { font: 800 26px/1.05 var(--font-display); font-stretch: 85%; }
+.hist { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; align-items: end; height: 96px; }
+.hist div { display: grid; align-content: end; gap: 4px; text-align: center; height: 100%; }
+.hist i { display: block; border-radius: 6px 6px 3px 3px; min-height: 3px; transition: height 0.5s ease; }
 .hist span { font: 500 11px var(--font-data); color: var(--ink-2); }
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
-.toolbar .btn { min-height: 40px; padding: 0 14px; font-size: 14px; }
+.toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .rec-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.rec { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
-.rec .thumb { width: 44px; height: 56px; border-radius: 6px; background: #000 center/cover no-repeat; }
-.rec .meta { min-width: 0; }
-.rec .meta b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rec .meta .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rec .right { display: grid; justify-items: end; gap: 4px; }
-.mini-score { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: #fff; font: 800 18px var(--font-display); }
-.sync-tag { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
+.rec { display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; align-items: center; background: var(--surface); border-radius: 16px; padding: 10px 12px; box-shadow: var(--shadow); cursor: pointer; border: 0; width: 100%; text-align: left; }
+.rec:active { transform: scale(0.99); }
+.rec .thumb { width: 48px; height: 60px; border-radius: 9px; background: #000 center/cover no-repeat; }
+.rec .meta { min-width: 0; display: grid; gap: 1px; }
+.rec .meta b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.rec .meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink-2); }
+.rec .right { display: grid; justify-items: end; gap: 5px; }
+.mini-score { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: #fff; font: 800 19px var(--font-display); }
+.sync-tag { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }
+.sync-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--healthy); }
+.sync-tag[data-s="local"]::before { background: var(--ink-2); }
 .sync-tag[data-s="pending"] { color: var(--warn-ink); }
+.sync-tag[data-s="pending"]::before { background: var(--chlorotic); }
 .sync-tag[data-s="error"] { color: var(--necrotic); }
-.empty { text-align: center; padding: 28px 16px; display: grid; gap: 8px; justify-items: center; }
+.sync-tag[data-s="error"]::before { background: var(--necrotic); }
+.empty { text-align: center; padding: 30px 18px; justify-items: center; gap: 8px; }
+.empty svg { width: 44px; height: 44px; color: var(--ink-2); }
 
-/* Settings */
+/* ---------- record sheet ---------- */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(8,14,10,0.5); display: grid; align-items: end; justify-items: center; animation: fade 0.2s ease; }
+.sheet {
+  width: 100%; max-width: 560px; max-height: 88vh; overflow: auto; background: var(--surface); border-radius: 22px 22px 0 0;
+  padding-block: 10px calc(18px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 14px; animation: rise 0.25s cubic-bezier(.2,.8,.2,1);
+}
+.grabber { width: 40px; height: 5px; border-radius: 3px; background: var(--line); justify-self: center; }
+.sheet-head { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
+.sheet-img { border-radius: 12px; background: #000; overflow: auto; }
+.sheet-img canvas { display: block; max-width: none; height: 130px; width: auto; }
+.sheet-img.upright canvas { height: 220px; margin: 0 auto; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 0; }
+.kv div { display: grid; gap: 1px; min-width: 0; }
+.kv dt { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); }
+.kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn-danger { background: transparent; border-color: var(--necrotic); color: var(--necrotic); }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { transform: translateY(30px); opacity: 0; } }
+
+/* ---------- settings ---------- */
 .dest-list { display: grid; gap: 8px; }
-.dest { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: var(--bg); }
+.dest { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start; padding: 13px; border: 1px solid var(--line); border-radius: 14px; cursor: pointer; background: var(--bg); transition: border-color 0.15s; }
 .dest input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
 .dest b { display: block; font-size: 15px; }
 .dest .small { color: var(--ink-2); }
-.dest:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.dest.soon { cursor: default; opacity: 0.55; }
+.dest:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface); }
+.dest.soon { cursor: default; opacity: 0.5; }
 .dest .soon-tag { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 6px; color: var(--ink-2); }
 .qr-box { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
-#qr { background: #fff; padding: 8px; border-radius: 8px; width: 132px; height: 132px; }
+#qr { background: #fff; padding: 8px; border-radius: 10px; width: 132px; height: 132px; display: grid; place-items: center; color: #333; text-align: center; }
 #qr img, #qr canvas { width: 116px !important; height: 116px !important; }
 .status-line { font-size: 13px; }
 .status-line.ok { color: var(--healthy); }
 .status-line.err { color: var(--necrotic); }
 details.method summary { cursor: pointer; font-weight: 600; }
 details.method table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-details.method td, details.method th { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+details.method td, details.method th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
 
-.install { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: start; }
-.install img { width: 44px; height: 44px; border-radius: 10px; }
-.install-steps { margin: 6px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
-.install-actions { display: flex; gap: 8px; flex-wrap: wrap; grid-column: 1 / -1; }
-.install-actions .btn { min-height: 42px; }
-.share-ico { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; }
-
-/* Tabs + toast */
+/* ---------- tab bar + toast ---------- */
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
-  background: var(--surface); border-top: 1px solid var(--line);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; pointer-events: none;
+  padding-top: 0; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px));
 }
-.tabbar-inner { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); height: var(--tabbar-h); }
-.tab { border: 0; background: none; display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 12px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
-.tab svg { width: 24px; height: 24px; }
-.tab[aria-current="page"] { color: var(--accent); }
-.badge { font: 500 10px var(--font-data); background: var(--necrotic); color: #fff; border-radius: 999px; padding: 1px 6px; margin-left: 2px; }
+.tabbar-inner {
+  pointer-events: auto; max-width: 420px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  height: var(--tabbar-h); padding: 6px; border-radius: 22px; background: var(--surface);
+  box-shadow: 0 8px 30px rgba(10,20,14,0.2), 0 0 0 1px var(--line);
+}
+.tab { border: 0; background: none; border-radius: 16px; display: grid; justify-items: center; align-content: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--ink-2); cursor: pointer; position: relative; transition: background-color 0.2s, color 0.2s; }
+.tab svg { width: 23px; height: 23px; }
+.tab[aria-current="page"] { color: var(--accent); background: var(--surface-2); }
+.badge { position: absolute; top: 4px; left: calc(50% + 8px); font: 500 10px var(--font-data); background: var(--necrotic); color: #fff; border-radius: 999px; padding: 1px 6px; }
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); z-index: 20;
-  bottom: calc(var(--tabbar-h) + 14px + env(safe-area-inset-bottom, 0px));
-  background: var(--ink); color: var(--bg); padding: 11px 16px; border-radius: 12px; font-size: 14px;
-  max-width: calc(100% - 32px); box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 40;
+  bottom: calc(var(--tabbar-h) + 22px + env(safe-area-inset-bottom, 0px));
+  background: var(--ink); color: var(--bg); padding: 12px 16px; border-radius: 14px; font-size: 14px;
+  max-width: calc(100% - 32px); width: max-content; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
 }
-.spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+.reveal { animation: rise 0.35s cubic-bezier(.2,.8,.2,1); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .saved-check path { stroke-dashoffset: 0; }
+}
 @media (max-width: 380px) {
   .row2 { grid-template-columns: 1fr; }
-  .capture-actions { grid-template-columns: 1fr; }
-  .tissue-row { grid-template-columns: 84px 1fr 58px; }
+  .result-head { grid-template-columns: 112px 1fr; }
+  .gauge, .gauge svg { width: 112px; height: 112px; }
+  .capture-top { grid-template-columns: 1fr 76px; }
+  .finder { width: 76px; height: 96px; }
 }
 </style>
 </head>
@@ -272,7 +347,8 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
 
 <header class="topbar">
   <div class="topbar-inner">
-    <h1 class="brand">BLS Leaf Scorer<small id="trialLabel">No trial set</small></h1>
+    <img class="logo" src="icons/icon-192.png" alt="">
+    <h1 class="brand"><b>BLS Leaf Scorer</b><span id="trialLabel">No trial set</span></h1>
     <button class="sync-pill" id="syncPill" type="button" data-state="ok" aria-label="Sync status">
       <span class="dot"></span><span id="syncText">This phone</span>
     </button>
@@ -299,17 +375,28 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
       </div>
     </div>
 
-    <div class="capture">
-      <div>
-        <div class="eyebrow" style="color:#b9e3c4">New leaf</div>
-        <h2>Photograph one leaf on the black board</h2>
+    <div class="capture" id="capture">
+      <div class="capture-top">
+        <div>
+          <div class="eyebrow">New leaf</div>
+          <h2>Photograph one leaf on the black board</h2>
+        </div>
+        <svg class="finder" viewBox="0 0 96 120" aria-hidden="true">
+          <rect x="6" y="6" width="84" height="108" rx="8" fill="#050806"/>
+          <path d="M48 16c-11 18-14 38-14 54 0 18 6 34 14 34s14-16 14-34c0-16-3-36-14-54z" fill="#4c9a3d"/>
+          <path d="M48 22v80" stroke="#050806" stroke-width="1.5"/>
+          <ellipse cx="43" cy="52" rx="2.6" ry="7" fill="#b4441c"/><ellipse cx="54" cy="72" rx="2.2" ry="6" fill="#d9a400"/><ellipse cx="44" cy="84" rx="2" ry="5" fill="#b4441c"/>
+          <g stroke="#8fd19e" stroke-width="3" fill="none" stroke-linecap="round">
+            <path d="M2 18V2h16M78 2h16v16M94 102v16H78M18 118H2v-16"/>
+          </g>
+        </svg>
       </div>
       <div class="capture-actions">
-        <label class="btn btn-primary" for="camInput">
+        <label class="btn btn-camera" for="camInput">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
           Take photo
         </label>
-        <label class="btn btn-ghost" for="fileInput">
+        <label class="btn btn-gallery" for="fileInput">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/></svg>
           Gallery
         </label>
@@ -317,43 +404,60 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
         <input id="fileInput" type="file" accept="image/jpeg,image/png" hidden>
       </div>
       <ul class="tips">
-        <li>Leaf flat on matte black, nothing else in the frame</li>
-        <li>Even light: shade or overcast, no flash, no glare</li>
-        <li>Fill the frame top to bottom with the leaf</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 6c-3 4-3.5 8-3.5 10 0 1.5 1.5 3 3.5 3s3.5-1.5 3.5-3c0-2-.5-6-3.5-10z"/></svg>Leaf flat on matte black</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 18a5 5 0 1 1 1.5-9.8A6 6 0 0 1 20 11a4 4 0 0 1-1 7z"/></svg>Shade, no flash or glare</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Leaf fills the frame</li>
       </ul>
-      <button class="sample-link" id="sampleBtn" type="button">Try it with the example leaf (BLS_02)</button>
+      <button class="sample-link" id="sampleBtn" type="button">Try it with the example leaf</button>
     </div>
 
-    <div class="card" id="busy" hidden>
-      <div style="display:flex;gap:12px;align-items:center"><div class="spinner"></div><span>Classifying leaf pixels…</span></div>
-    </div>
+    <div class="card busy" id="busy" hidden><div class="spinner"></div><div><b>Reading the leaf…</b><div class="small muted">Classifying every pixel on this phone</div></div></div>
 
-    <div class="card" id="errorCard" hidden>
+    <div class="card error-card" id="errorCard" hidden>
       <h3>No leaf found</h3>
       <p class="muted small" id="errorText" style="margin:0"></p>
     </div>
 
+    <div class="card saved reveal" id="savedCard" hidden>
+      <div class="saved-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+      <div><h3 id="savedTitle">Saved</h3><p class="small muted" id="savedText" style="margin:4px 0 0"></p></div>
+      <div class="saved-actions">
+        <label class="btn btn-primary" for="camInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          <span id="nextLeafLabel">Next leaf</span>
+        </label>
+        <button class="btn btn-ghost" type="button" id="viewRecordsBtn">Records</button>
+      </div>
+    </div>
+
     <article id="result" hidden class="view">
-      <div class="card">
+      <div class="card result-card reveal">
         <div class="result-head">
-          <div class="score-badge" id="scoreBadge"><div class="big num" id="scoreNum">–</div><div class="lbl">BLS score</div></div>
+          <div class="gauge" aria-hidden="true">
+            <svg viewBox="0 0 132 132"><circle class="track" cx="66" cy="66" r="56" fill="none" stroke-width="12"/><circle class="arc" id="gaugeArc" cx="66" cy="66" r="56" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="351.86" stroke-dashoffset="351.86"/></svg>
+            <div class="gauge-center"><div class="big num" id="scoreNum">–</div><div class="lbl">BLS score</div></div>
+          </div>
           <div class="result-title">
             <div class="eyebrow" id="resultSource">Result</div>
-            <div class="diseased"><span class="num" id="diseasedPct">–</span><span> diseased leaf area</span></div>
+            <div class="diseased num" id="diseasedPct">–</div>
+            <div class="diseased-sub">diseased leaf area</div>
             <span class="chip" id="catChip"><span class="sw"></span><span id="catText">–</span></span>
           </div>
         </div>
         <div class="qc-warn" id="qcWarn" hidden></div>
+        <div class="comp">
+          <div class="comp-bar" id="compBar"></div>
+          <div class="comp-legend" id="compLegend"></div>
+        </div>
         <div class="scale" aria-label="BLS 1 to 9 scale">
           <div class="scale-bar" id="scaleBar"></div>
           <div class="scale-ticks" id="scaleTicks"></div>
-          <div class="small muted">Diseased leaf area (%) up to which each score applies</div>
+          <div class="small muted">Diseased area (%) up to which each score applies</div>
         </div>
-        <div class="tissue" id="tissue"></div>
       </div>
 
       <div class="card viewer">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="viewer-head">
           <div class="seg" role="group" aria-label="Image view">
             <button type="button" data-view="overlay" aria-pressed="true">Classified</button>
             <button type="button" data-view="original" aria-pressed="false">Original</button>
@@ -365,24 +469,40 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
       </div>
 
       <form class="card form" id="metaForm" autocomplete="off">
-        <h3>Sample details</h3>
-        <div class="row2">
-          <div class="field"><label for="fPlot">Plot / sample ID</label><input id="fPlot" type="text" required placeholder="e.g. P-1042"></div>
-          <div class="field"><label for="fGenotype">Genotype / entry</label><input id="fGenotype" type="text" placeholder="e.g. B73"></div>
+        <h3>Save this leaf</h3>
+        <div class="field">
+          <label for="fPlot">Plot / sample ID</label>
+          <input id="fPlot" class="input-lg" type="text" required placeholder="e.g. P-1042" enterkeyhint="done">
         </div>
         <div class="row2">
-          <div class="field"><label for="fRep">Rep</label><input id="fRep" type="number" min="1" inputmode="numeric" placeholder="1"></div>
-          <div class="field"><label for="fLeaf">Leaf no.</label><input id="fLeaf" type="number" min="1" inputmode="numeric" placeholder="1"></div>
+          <div class="field"><span class="label" id="repLbl">Rep</span>
+            <div class="stepper" role="group" aria-labelledby="repLbl"><button type="button" data-step="fRep" data-d="-1" aria-label="Rep down">−</button><input id="fRep" type="number" min="1" inputmode="numeric" value="1" aria-labelledby="repLbl"><button type="button" data-step="fRep" data-d="1" aria-label="Rep up">+</button></div>
+          </div>
+          <div class="field"><span class="label" id="leafLbl">Leaf no.</span>
+            <div class="stepper" role="group" aria-labelledby="leafLbl"><button type="button" data-step="fLeaf" data-d="-1" aria-label="Leaf down">−</button><input id="fLeaf" type="number" min="1" inputmode="numeric" value="1" aria-labelledby="leafLbl"><button type="button" data-step="fLeaf" data-d="1" aria-label="Leaf up">+</button></div>
+          </div>
         </div>
-        <div class="row2">
-          <div class="field"><label for="fTrial">Trial</label><input id="fTrial" type="text" placeholder="e.g. BLS-2026-Ames"></div>
-          <div class="field"><label for="fRater">Rater</label><input id="fRater" type="text" placeholder="Your name"></div>
+        <div class="field"><label for="fGenotype">Genotype / entry <span class="muted" style="font-weight:400">(optional)</span></label><input id="fGenotype" type="text" placeholder="e.g. B73"></div>
+
+        <div class="context-line">
+          <span id="contextText">Trial and rater not set</span>
+          <button class="link-btn" type="button" id="moreBtn" aria-expanded="false" aria-controls="moreFields">Edit</button>
         </div>
-        <div class="field"><label for="fNotes">Notes</label><textarea id="fNotes" placeholder="Optional"></textarea></div>
-        <label class="check"><input id="fGps" type="checkbox" checked> Record GPS location</label>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
-          <button class="btn btn-primary" type="submit" id="saveBtn">Save record</button>
-          <button class="btn btn-ghost" type="button" id="discardBtn">Discard</button>
+        <div class="form" id="moreFields" hidden>
+          <div class="row2">
+            <div class="field"><label for="fTrial">Trial</label><input id="fTrial" type="text" placeholder="e.g. BLS-2026-Ames"></div>
+            <div class="field"><label for="fRater">Rater</label><input id="fRater" type="text" placeholder="Your name"></div>
+          </div>
+          <div class="field"><label for="fNotes">Notes</label><textarea id="fNotes" placeholder="Optional"></textarea></div>
+          <label class="check"><input id="fGps" type="checkbox" checked> Record GPS location</label>
+        </div>
+
+        <div class="save-row">
+          <button class="btn btn-primary" type="submit" id="saveBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+            Save record
+          </button>
+          <button class="btn btn-ghost" type="button" id="discardBtn">Retake</button>
         </div>
       </form>
     </article>
@@ -390,29 +510,31 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
 
   <!-- RECORDS -->
   <section class="view" id="view-records" aria-label="Records" hidden>
-    <div style="display:flex;justify-content:space-between;align-items:end;gap:8px;flex-wrap:wrap">
-      <div><div class="eyebrow">Saved on this phone</div><h2>Records</h2></div>
-      <div class="field" style="min-width:150px"><label for="trialFilter" class="small">Trial</label>
-        <select id="trialFilter"><option value="">All trials</option></select></div>
+    <div><div class="eyebrow">Saved on this phone</div><h2>Records</h2></div>
+    <div class="filters">
+      <input id="recSearch" type="search" placeholder="Search plot, genotype, notes" aria-label="Search records">
+      <select id="trialFilter" aria-label="Trial"><option value="">All trials</option></select>
     </div>
     <div class="stats">
       <div class="stat"><span class="eyebrow">Leaves</span><b class="num" id="stN">0</b></div>
       <div class="stat"><span class="eyebrow">Mean score</span><b class="num" id="stMean">–</b></div>
-      <div class="stat"><span class="eyebrow">Mean diseased</span><b class="num" id="stDis">–</b></div>
+      <div class="stat"><span class="eyebrow">Diseased</span><b class="num" id="stDis">–</b></div>
     </div>
     <div class="card">
       <div class="eyebrow">Score distribution</div>
       <div class="hist" id="hist"></div>
     </div>
     <div class="toolbar">
-      <button class="btn btn-primary" type="button" id="exportCsv">Export CSV</button>
-      <button class="btn btn-ghost" type="button" id="syncNow">Sync now</button>
+      <button class="btn btn-primary" type="button" id="exportCsv">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Export CSV</button>
+      <button class="btn btn-soft" type="button" id="syncNow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Sync now</button>
     </div>
-    <p class="small muted" id="exportNote" style="margin:0">CSV columns match <span class="num">BLS_results.csv</span> from the R pipeline, plus sample details.</p>
     <ul class="rec-list" id="recList"></ul>
     <div class="card empty" id="recEmpty" hidden>
-      <h3>No records yet</h3>
-      <p class="muted small" style="margin:0">Score a leaf on the Analyze tab and tap Save record. Records stay on this phone and sync to your storage when you are online.</p>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3c-4 5-5 10-5 13 0 2.5 2.2 5 5 5s5-2.5 5-5c0-3-1-8-5-13z"/><path d="M12 8v13"/></svg>
+      <h3 id="emptyTitle">No records yet</h3>
+      <p class="muted small" style="margin:0" id="emptyText">Score a leaf on the Analyze tab and tap Save record. Records stay on this phone and sync when you're online.</p>
     </div>
   </section>
 
@@ -420,7 +542,7 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
   <section class="view" id="view-settings" aria-label="Settings" hidden>
     <div><div class="eyebrow">Your data, your storage</div><h2>Where records are saved</h2></div>
     <div class="card">
-      <p class="small muted" style="margin:0">Every record is saved on this phone first. Choose where copies go when you are online. The app has no server of its own: data goes straight from this phone to the storage you choose.</p>
+      <p class="small muted" style="margin:0">Every record is saved on this phone first. Choose where copies go when you're online. The app has no server of its own: data goes straight from this phone to the storage you choose.</p>
       <div class="dest-list" id="destList"></div>
       <div id="destFields" class="form"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -431,24 +553,25 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
     </div>
 
     <div class="card">
-      <h3>Set up a team</h3>
-      <p class="small muted" style="margin:0">Team members scan this code with their phone camera to open the app with the same storage, trial and settings. Keys are included, so only share it with your team.</p>
-      <div class="qr-box">
-        <div id="qr" aria-label="Team setup QR code"></div>
-        <div style="display:grid;gap:8px;min-width:0">
-          <button class="btn btn-ghost" type="button" id="copySetup">Copy setup link</button>
-          <span class="small muted" id="copyNote"></span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
       <h3>Defaults</h3>
       <div class="row2">
         <div class="field"><label for="dTrial">Trial</label><input id="dTrial" type="text" placeholder="e.g. BLS-2026-Ames"></div>
         <div class="field"><label for="dRater">Rater</label><input id="dRater" type="text" placeholder="Your name"></div>
       </div>
       <label class="check"><input id="dPhotos" type="checkbox" checked> Upload photos and overlays (uses more data)</label>
+      <button class="btn btn-soft" type="button" id="saveDefaults">Save defaults</button>
+    </div>
+
+    <div class="card">
+      <h3>Set up a team</h3>
+      <p class="small muted" style="margin:0">Team members scan this code with their phone camera to open the app with the same storage, trial and settings. Keys are included, so only share it with your team.</p>
+      <div class="qr-box">
+        <div id="qr" aria-label="Team setup QR code"></div>
+        <div style="display:grid;gap:8px;min-width:0">
+          <button class="btn btn-ghost" type="button" id="copySetup">Copy setup link</button>
+          <span class="small muted" id="copyNote" style="overflow-wrap:anywhere"></span>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -469,13 +592,14 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
     <button class="tab" type="button" data-tab="analyze" aria-current="page">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Analyze</button>
     <button class="tab" type="button" data-tab="records">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Records<span class="badge" id="pendingBadge" hidden></span></span></button>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Records<span class="badge" id="pendingBadge" hidden></span></button>
     <button class="tab" type="button" data-tab="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/></svg>Settings</button>
   </div>
 </nav>
 
 <div class="toast" id="toast" role="status" hidden></div>
+<div id="sheetRoot"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="engine.js"></script>
