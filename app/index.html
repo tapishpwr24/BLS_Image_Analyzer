@@ -9,7 +9,11 @@
 <meta name="theme-color" content="#16301f">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BLS Scorer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -229,6 +233,13 @@ details.method summary { cursor: pointer; font-weight: 600; }
 details.method table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 details.method td, details.method th { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: left; }
 
+.install { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: start; }
+.install img { width: 44px; height: 44px; border-radius: 10px; }
+.install-steps { margin: 6px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 4px; }
+.install-actions { display: flex; gap: 8px; flex-wrap: wrap; grid-column: 1 / -1; }
+.install-actions .btn { min-height: 42px; }
+.share-ico { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; }
+
 /* Tabs + toast */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
@@ -271,6 +282,23 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
 <main>
   <!-- ANALYZE -->
   <section class="view" id="view-analyze" aria-label="Analyze">
+    <div class="card install" id="installCard" hidden>
+      <img src="icons/icon-192.png" alt="">
+      <div>
+        <h3>Install BLS Leaf Scorer</h3>
+        <p class="small muted" style="margin:2px 0 0" id="installText">Add it to your home screen. It opens like an app and works without internet.</p>
+        <ol class="install-steps" id="iosSteps" hidden>
+          <li>Tap <b>Share</b> <svg class="share-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 11v9h14v-9"/></svg> in Safari's toolbar</li>
+          <li>Scroll down and tap <b>Add to Home Screen</b></li>
+          <li>Tap <b>Add</b>, then open the app from your home screen</li>
+        </ol>
+      </div>
+      <div class="install-actions">
+        <button class="btn btn-primary" type="button" id="installBtn" hidden>Install app</button>
+        <button class="btn btn-ghost" type="button" id="installLater">Not now</button>
+      </div>
+    </div>
+
     <div class="capture">
       <div>
         <div class="eyebrow" style="color:#b9e3c4">New leaf</div>
@@ -421,6 +449,11 @@ details.method td, details.method th { padding: 5px 4px; border-bottom: 1px soli
         <div class="field"><label for="dRater">Rater</label><input id="dRater" type="text" placeholder="Your name"></div>
       </div>
       <label class="check"><input id="dPhotos" type="checkbox" checked> Upload photos and overlays (uses more data)</label>
+    </div>
+
+    <div class="card">
+      <h3>This phone</h3>
+      <div class="small" id="phoneInfo" style="display:grid;gap:4px"></div>
     </div>
 
     <details class="card method">

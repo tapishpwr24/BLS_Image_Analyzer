@@ -292,6 +292,7 @@
         window.scrollTo(0, 0);
         refreshPending();
         syncPending();
+        protectStorage();
       })
       .catch(function (e) { toast("Could not save: " + (e && e.message ? e.message : "storage is full or blocked")); })
       .then(function () { btn.disabled = false; });
@@ -619,7 +620,95 @@
     }).join("");
   }
 
+  // ---------- install (Android + iPhone) ----------
+  var ua = navigator.userAgent || "";
+  var isIOS = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+  var isAndroid = /android/i.test(ua);
+  var inFrame = false;
+  try { inFrame = window.self !== window.top; } catch (e) { inFrame = true; }
+  function isInstalled() {
+    return (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  }
+  var deferredPrompt = null;
+  var SNOOZE_KEY = "bls-install-snooze";
+
+  function snoozed() {
+    try { return Date.now() < +(localStorage.getItem(SNOOZE_KEY) || 0); } catch (e) { return false; }
+  }
+
+  function showInstallCard() {
+    if (inFrame || isInstalled() || snoozed()) { $("installCard").hidden = true; return; }
+    if (deferredPrompt) {
+      // Android Chrome / Edge / Samsung Internet: one-tap install
+      $("installBtn").hidden = false;
+      $("iosSteps").hidden = true;
+      $("installText").textContent = "Install it on this phone. It opens like an app and works without internet.";
+      $("installCard").hidden = false;
+    } else if (isIOS) {
+      $("installBtn").hidden = true;
+      $("iosSteps").hidden = false;
+      $("installText").textContent = /crios|fxios|edgios/i.test(ua)
+        ? "Add it to your Home Screen. If you don't see the option, open this page in Safari."
+        : "Add it to your Home Screen. It opens like an app, works without internet, and keeps your records safe.";
+      $("installCard").hidden = false;
+    } else if (isAndroid) {
+      $("installBtn").hidden = true;
+      $("iosSteps").hidden = true;
+      $("installText").textContent = "Open the browser menu (⋮) and tap Install app or Add to Home screen.";
+      $("installCard").hidden = false;
+    }
+  }
+
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    showInstallCard();
+  });
+  window.addEventListener("appinstalled", function () {
+    deferredPrompt = null;
+    $("installCard").hidden = true;
+    toast("Installed. Open BLS Scorer from your home screen.");
+    protectStorage();
+  });
+  $("installBtn").addEventListener("click", function () {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(function () { deferredPrompt = null; showInstallCard(); });
+  });
+  $("installLater").addEventListener("click", function () {
+    try { localStorage.setItem(SNOOZE_KEY, String(Date.now() + 3 * 864e5)); } catch (e) { /* ignore */ }
+    $("installCard").hidden = true;
+  });
+
+  // Ask the phone not to clear our records when space runs low
+  function protectStorage() {
+    if (navigator.storage && navigator.storage.persist) {
+      return navigator.storage.persisted().then(function (p) { return p || navigator.storage.persist(); }).catch(function () { return false; });
+    }
+    return Promise.resolve(false);
+  }
+
+  function renderPhoneInfo() {
+    var lines = [];
+    lines.push(isInstalled() ? "Installed as an app" : "Running in the browser. Install it from the Analyze tab for offline use.");
+    lines.push(navigator.onLine === false ? "Offline: records will sync when you are back online" : "Online");
+    var box = $("phoneInfo");
+    var paint = function () { box.innerHTML = lines.map(function (l) { return "<span>" + esc(l) + "</span>"; }).join(""); };
+    paint();
+    if (navigator.storage && navigator.storage.estimate) {
+      Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : false]).then(function (r) {
+        var mb = (r[0].usage || 0) / 1e6;
+        lines.push("Using " + (mb < 1 ? "under 1" : mb.toFixed(0)) + " MB of storage" + (r[0].quota ? " (" + Math.round(r[0].quota / 1e9) + " GB available to the app)" : ""));
+        lines.push(r[1] ? "Records are protected from automatic clean-up" : "Export a CSV now and then as a backup");
+        paint();
+      }).catch(function () {});
+    }
+  }
+  document.querySelector('[data-tab="settings"]').addEventListener("click", renderPhoneInfo);
+
   // ---------- start ----------
+  showInstallCard();
+  if (isInstalled()) protectStorage();
   updateHeader();
   renderMethod();
   checkSetupHash();
@@ -628,7 +717,7 @@
   // Open in a working state: first-time users see the example leaf scored
   Records.all().then(function (all) { if (!all.length && !current) loadSample(); });
 
-  if ("serviceWorker" in navigator && location.protocol === "https:") {
+  if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
     try { navigator.serviceWorker.register("sw.js").catch(function () {}); } catch (e) { /* not available here */ }
   }
 })();

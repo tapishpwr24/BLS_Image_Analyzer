@@ -1,8 +1,8 @@
 /* Offline support: the app shell is cached so scoring works with no signal. */
-var CACHE = "bls-leaf-scorer-v0.1.0";
+var CACHE = "bls-leaf-scorer-v0.2.0";
 var SHELL = [
   "./", "index.html", "engine.js", "store.js", "app.js", "connectors/connectors.js",
-  "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png",
+  "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/icon-maskable-512.png",
   "samples/BLS_02.jpg"
 ];
 

@@ -24,9 +24,27 @@ phone, so use the hosted version for field work.
 
 ## Host it for free (GitHub Pages)
 
-1. Repository **Settings → Pages → Build and deployment → Deploy from a branch**.
-2. Choose the branch and the `/ (root)` folder.
-3. The app is then at `https://<user>.github.io/BLS_Image_Analyzer/app/`.
+1. Push this branch to `main`.
+2. Repository **Settings → Pages → Source: GitHub Actions**.
+3. `.github/workflows/deploy-app.yml` publishes `app/` to
+   `https://<user>.github.io/BLS_Image_Analyzer/`, and redeploys on every push that changes `app/`.
+
+## Installing on phones
+
+Send users the link. The app shows each phone the right steps:
+
+| Phone | How to install |
+|---|---|
+| Android (Chrome, Edge, Samsung Internet) | Tap **Install app** in the app, or browser menu ⋮ → **Install app** |
+| iPhone / iPad (Safari) | **Share** → **Add to Home Screen** → **Add** |
+
+After installing, the app opens full-screen from its own icon and works with no internet. Stored
+records are marked as protected so the phone doesn't clear them. iPhones clear data for websites
+that haven't been used in 7 days, but apps added to the Home Screen are exempt, so iPhone users
+should always open the app from the Home Screen icon.
+
+**App stores:** the same code can be packaged with Capacitor for Google Play ($25 one-time) and the
+App Store ($99/year, and the iPhone build needs a Mac with Xcode). This isn't needed for field use.
 
 ## Storage options
 
