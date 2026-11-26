@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.3.0";
+  var APP_VERSION = "0.4.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -17,6 +17,7 @@
   var current = null;   // { name, imageData, result, overlayData, sample }
   var gps = null;
   var syncing = false;
+  var allRecords = [];  // latest copy of all records, for plot hints and progress
   var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // ---------- helpers ----------
@@ -103,34 +104,92 @@
     return ctx.getImageData(0, 0, cw, ch);
   }
 
-  function handleFile(blob, name, isSample, asExample) {
-    analyzeState("busy");
-    if (!isSample) requestGps();
-    window.scrollTo(0, 0);
+  // Long leaves: sections are stacked end to end into one image
+  function compose(list) {
+    if (list.length === 1) return list[0];
+    var w = 0, h = 0;
+    list.forEach(function (d) { w = Math.max(w, d.width); h += d.height; });
+    var c = document.createElement("canvas"); c.width = w; c.height = h;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+    var y = 0;
+    list.forEach(function (d) { ctx.putImageData(d, Math.round((w - d.width) / 2), y); y += d.height; });
+    return ctx.getImageData(0, 0, w, h);
+  }
+
+  function rebuildCurrent() {
+    var secs = current.sections;
+    current.result = secs.length > 1
+      ? E.combine(secs.map(function (x) { return x.result; }))
+      : Object.assign({ sections: 1 }, secs[0].result);
+    current.imageData = compose(secs.map(function (x) { return x.imageData; }));
+    current.overlayData = compose(secs.map(function (x) { return x.overlayData; }));
+    current.result.width = current.imageData.width;
+    current.result.height = current.imageData.height;
+    current.name = secs.map(function (x) { return x.name; }).join(" + ");
+  }
+
+  function handleFile(blob, name, isSample, asExample, append) {
+    var appending = !!(append && current);
+    if (appending) $("busy").hidden = false; else analyzeState("busy");
+    if (!isSample && !appending) requestGps();
+    if (!appending) window.scrollTo(0, 0);
     // Let the spinner paint before the pixel loop runs
     setTimeout(function () {
       decode(blob).then(function (bmp) {
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
         var res = E.analyze(data.data, data.width, data.height);
+        $("busy").hidden = true;
         if (!res.ok) {
+          if (appending) { toast("No leaf found in that photo. Try the section again."); return; }
           $("errorText").textContent = res.message;
           analyzeState("error");
           current = null;
           return;
         }
-        current = {
-          name: name, imageData: data, result: res, sample: !!isSample,
+        var sec = {
+          name: name, imageData: data, result: res,
           overlayData: new ImageData(E.overlay(data.data, res.mask, 0.45), data.width, data.height)
         };
-        analyzeState(asExample ? "example" : "result");
+        delete res.mask;
+        if (appending) current.sections.push(sec);
+        else current = { sections: [sec], sample: !!isSample };
+        rebuildCurrent();
+        if (!appending) analyzeState(asExample ? "example" : "result");
         renderResult();
         if (!asExample) buzz(25);
+        if (appending) toast("Section " + current.sections.length + " added. Score updated for the whole leaf.");
       }).catch(function (e) {
+        $("busy").hidden = true;
+        if (appending) { toast("That photo could not be read. Try again."); return; }
         $("errorText").textContent = (e && e.message) || "The photo could not be read. Try again.";
         analyzeState("error");
       });
     }, 30);
   }
+
+  $("secInput").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (f && current) handleFile(f, f.name || ("section-" + Date.now() + ".jpg"), false, false, true);
+    ev.target.value = "";
+  });
+
+  function renderSections() {
+    var secs = current.sections;
+    var html = secs.length > 1 ? secs.map(function (x, i) {
+      return '<span class="sec-chip">Section ' + (i + 1) + " · " + fmtPct(x.result.diseasedPct) +
+        '<button type="button" data-rm="' + i + '" aria-label="Remove section ' + (i + 1) + '">×</button></span>';
+    }).join("") : "";
+    html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
+    $("sections").innerHTML = html;
+  }
+  $("sections").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-rm]");
+    if (!b || !current || current.sections.length < 2) return;
+    current.sections.splice(+b.dataset.rm, 1);
+    rebuildCurrent();
+    renderResult();
+  });
 
   ["camInput", "fileInput"].forEach(function (id) {
     $(id).addEventListener("change", function (ev) {
@@ -217,7 +276,7 @@
     countUp($("diseasedPct"), r.diseasedPct, 1, "%");
     $("catText").textContent = r.category;
     $("catChip").querySelector(".sw").style.background = scoreColor(r.score);
-    $("resultSource").textContent = current.sample ? "Example leaf · BLS_02" : "Just now";
+    $("resultSource").textContent = r.sections > 1 ? "Whole leaf · " + r.sections + " sections" : (current.sample ? "Example leaf · BLS_02" : "Just now");
 
     var warn = r.qc !== "PASS" ? "Quality check: " + r.qc + ". Pixel classes do not add up; retake the photo." : "";
     if (!warn && r.leafPixels < 20000) warn = "The leaf covers only a small part of the photo. Move closer so the leaf fills the frame.";
@@ -237,6 +296,8 @@
 
     buildScale(r.score);
     drawLeaf();
+    renderSections();
+    applyPlot();
 
     if (!$("fTrial").value) $("fTrial").value = settings.trial || "";
     if (!$("fRater").value) $("fRater").value = settings.rater || "";
@@ -300,7 +361,8 @@
     settings.trial = meta.trial; settings.rater = meta.rater;
     Settings.save(settings); updateHeader();
 
-    Promise.all([canvasBlob(current.imageData, MAX_STORED_SIDE), canvasBlob(current.overlayData, MAX_STORED_SIDE)])
+    var storeSide = Math.min(4096, MAX_STORED_SIDE * current.sections.length);
+    Promise.all([canvasBlob(current.imageData, storeSide), canvasBlob(current.overlayData, storeSide)])
       .then(function (blobs) {
         return Records.put({
           id: uid(), createdAt: new Date().toISOString(), imageName: current.name, meta: meta,
@@ -309,7 +371,7 @@
             leafPixels: r.leafPixels, healthyPixels: r.healthyPixels, chloroticPixels: r.chloroticPixels,
             necroticPixels: r.necroticPixels, healthyPct: r.healthyPct, chloroticPct: r.chloroticPct,
             necroticPct: r.necroticPct, diseasedPct: r.diseasedPct, score: r.score, category: r.category,
-            qc: r.qc, width: r.width, height: r.height
+            qc: r.qc, width: r.width, height: r.height, sections: r.sections || 1
           },
           engine: E.VERSION, photo: blobs[0], overlay: blobs[1],
           sync: settings.destination === "local" ? "local" : "pending", syncError: null, remote: {}
@@ -326,6 +388,9 @@
         $("fNotes").value = "";
         $("fLeaf").value = String((parseInt($("fLeaf").value, 10) || 0) + 1);
         $("nextLeafLabel").textContent = "Next leaf (" + $("fLeaf").value + ")";
+        var np = nextPlotAfter(meta.plot);
+        $("nextPlotBtn").hidden = !np;
+        if (np) { $("nextPlotBtn").textContent = "Next plot in list: " + np.plot + " →"; $("nextPlotBtn").dataset.plot = np.plot; }
         current = null;
         analyzeState("saved");
         window.scrollTo(0, 0);
@@ -350,7 +415,8 @@
       Latitude: g.lat == null ? "" : g.lat, Longitude: g.lon == null ? "" : g.lon, GPS_Accuracy_m: g.acc == null ? "" : g.acc,
       Notes: m.notes, Image_Width: r.width, Image_Height: r.height, Engine_Version: rec.engine,
       Device: "BLS Leaf Scorer " + APP_VERSION,
-      Photo_URL: (rec.remote && rec.remote.photoUrl) || "", Overlay_URL: (rec.remote && rec.remote.overlayUrl) || ""
+      Photo_URL: (rec.remote && rec.remote.photoUrl) || "", Overlay_URL: (rec.remote && rec.remote.overlayUrl) || "",
+      Sections: r.sections || 1, Edited_At: rec.editedAt || ""
     };
   }
 
@@ -383,7 +449,7 @@
         chain = chain.then(function () {
           var withPhotos = settings.uploadPhotos;
           return Promise.all([withPhotos ? blobToBase64(rec.photo) : null, withPhotos ? blobToBase64(rec.overlay) : null])
-            .then(function (b) { return conn.send({ row: toRow(rec), photo: b[0], overlay: b[1] }, cfg); })
+            .then(function (b) { return conn.send({ event: rec.editedAt ? "update" : "record", row: toRow(rec), photo: b[0], overlay: b[1] }, cfg); })
             .then(function (resp) {
               rec.sync = "synced"; rec.syncError = null;
               rec.remote = { photoUrl: resp.photoUrl || "", overlayUrl: resp.overlayUrl || "" };
@@ -414,6 +480,8 @@
 
   function refreshPending() {
     return Records.all().then(function (all) {
+      allRecords = all;
+      applyPlot();
       var dest = settings.destination;
       var unsynced = dest === "local" ? 0 : all.filter(function (r) { return r.sync !== "synced"; }).length;
       var errors = all.some(function (r) { return r.sync === "error"; });
@@ -455,6 +523,10 @@
       }).join("");
       var list = filtered(all);
       listCache = list;
+      renderProgress(all);
+      $("leavesPane").hidden = recMode !== "leaves";
+      $("summaryPane").hidden = recMode !== "summary";
+      if (recMode === "summary") renderSummary(list);
 
       var n = list.length;
       $("stN").textContent = n;
@@ -509,6 +581,8 @@
       ["Saved", new Date(rec.createdAt).toLocaleString()], ["GPS", rec.gps ? rec.gps.lat + ", " + rec.gps.lon : "–"]
     ];
     if (m.notes) kv.push(["Notes", m.notes]);
+    if (r.sections > 1) kv.push(["Photographed in", r.sections + " sections"]);
+    if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
     var wrap = document.createElement("div");
     wrap.className = "sheet-backdrop";
@@ -520,6 +594,7 @@
       (rec.overlay ? '<div class="sheet-img' + (tall ? "" : " upright") + '"><canvas aria-label="Classified leaf"></canvas></div>' : "") +
       '<dl class="kv">' + kv.map(function (p) { return "<div><dt>" + esc(p[0]) + "</dt><dd>" + esc(p[1] || "–") + "</dd></div>"; }).join("") + "</dl>" +
       '<div class="sheet-actions">' +
+      '<button class="btn btn-primary" type="button" data-act="edit">Edit</button>' +
       (rec.sync === "error" || rec.sync === "pending" ? '<button class="btn btn-soft" type="button" data-act="retry">Retry sync</button>' : '<button class="btn btn-soft" type="button" data-act="close">Close</button>') +
       '<button class="btn btn-danger" type="button" data-act="delete">Delete</button></div></div>';
     wrap.addEventListener("click", function (e) {
@@ -527,6 +602,7 @@
       var b = e.target.closest("[data-act]");
       if (!b) return;
       if (b.dataset.act === "close") closeSheet();
+      if (b.dataset.act === "edit") return showEditForm(wrap.querySelector(".sheet"), rec);
       if (b.dataset.act === "retry") { closeSheet(); syncPending(); }
       if (b.dataset.act === "delete") {
         // Two taps (browser confirm dialogs aren't available everywhere)
@@ -552,29 +628,35 @@
     if (b) openSheet(listCache[+b.dataset.i]);
   });
 
+  function buildCsv(list) {
+    var lines = [C.COLUMNS.join(",")].concat(list.map(function (rec) {
+      var row = toRow(rec);
+      return C.COLUMNS.map(function (k) { return csvCell(row[k]); }).join(",");
+    }));
+    return "﻿" + lines.join("\r\n");
+  }
+
+  // On phones the share sheet sends files to Drive, email, WhatsApp…; elsewhere download
+  function shareOrDownload(blob, name, type, doneMsg) {
+    var file = null;
+    try { file = new File([blob], name, { type: type }); } catch (e) { file = null; }
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: name }).catch(function () {});
+    }
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    if (doneMsg) toast(doneMsg);
+  }
+  function today() { return new Date().toISOString().slice(0, 10); }
+  function trialTag() { var t = $("trialFilter").value; return t ? t.replace(/[^\w-]+/g, "_") + "_" : ""; }
+
   $("exportCsv").addEventListener("click", function () {
     Records.all().then(function (all) {
       var list = filtered(all).slice().reverse();
       if (!list.length) { toast("No records to export yet"); return; }
-      var lines = [C.COLUMNS.join(",")].concat(list.map(function (rec) {
-        var row = toRow(rec);
-        return C.COLUMNS.map(function (k) { return csvCell(row[k]); }).join(",");
-      }));
-      var trial = $("trialFilter").value;
-      var name = "BLS_results_" + (trial ? trial.replace(/[^\w-]+/g, "_") + "_" : "") + new Date().toISOString().slice(0, 10) + ".csv";
-      var blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
-      var file = null;
-      try { file = new File([blob], name, { type: "text/csv" }); } catch (e) { file = null; }
-      // On phones, the share sheet sends the file to Drive, email, WhatsApp…
-      if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: name }).catch(function () {});
-        return;
-      }
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
-      toast("Exported " + list.length + " records");
+      shareOrDownload(new Blob([buildCsv(list)], { type: "text/csv" }), "BLS_results_" + trialTag() + today() + ".csv", "text/csv", "Exported " + list.length + " records");
     });
   });
 
@@ -599,6 +681,7 @@
     $("dRater").value = settings.rater || "";
     $("dPhotos").checked = !!settings.uploadPhotos;
     $("destStatus").textContent = "";
+    renderPlotSettings();
     renderQr();
   }
 
@@ -716,6 +799,343 @@
     try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
   }
 
+  // ---------- edit a saved record ----------
+  function showEditForm(sheet, rec) {
+    var m = rec.meta;
+    var f = function (id, label, val, type) {
+      return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || "text") + '" value="' + esc(val || "") + '"' + (type === "number" ? ' min="1" inputmode="numeric"' : "") + "></div>";
+    };
+    sheet.innerHTML = '<div class="grabber"></div><h3>Edit record</h3>' +
+      '<p class="small muted" style="margin:0">Score ' + rec.result.score + " · " + fmtPct(rec.result.diseasedPct) + " diseased. The score comes from the photo and cannot be edited.</p>" +
+      '<div class="form">' + f("ePlot", "Plot / sample ID", m.plot) +
+      '<div class="row2">' + f("eRep", "Rep", m.rep, "number") + f("eLeaf", "Leaf no.", m.leaf, "number") + "</div>" +
+      f("eGenotype", "Genotype / entry", m.genotype) +
+      '<div class="row2">' + f("eTrial", "Trial", m.trial) + f("eRater", "Rater", m.rater) + "</div>" +
+      '<div class="field"><label for="eNotes">Notes</label><textarea id="eNotes">' + esc(m.notes || "") + "</textarea></div></div>" +
+      '<div class="sheet-actions"><button class="btn btn-primary" type="button" id="eSave">Save changes</button><button class="btn btn-ghost" type="button" id="eCancel">Cancel</button></div>';
+    sheet.querySelector("#eCancel").addEventListener("click", closeSheet);
+    sheet.querySelector("#eSave").addEventListener("click", function () {
+      var v = function (id) { return sheet.querySelector("#" + id).value.trim(); };
+      if (!v("ePlot")) { sheet.querySelector("#ePlot").focus(); toast("Plot ID is required"); return; }
+      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes") };
+      rec.editedAt = new Date().toISOString();
+      if (settings.destination !== "local") rec.sync = "pending";
+      Records.put(rec).then(function () {
+        closeSheet(); toast("Changes saved"); renderRecords(); refreshPending(); syncPending();
+      });
+    });
+    sheet.querySelector("#ePlot").focus({ preventScroll: true });
+  }
+
+  // ---------- plot list ----------
+  function parseCsv(text) {
+    text = text.replace(/^﻿/, "");
+    var first = text.split(/\r?\n/)[0] || "";
+    var delim = [",", ";", "\t"].sort(function (a, b) { return first.split(b).length - first.split(a).length; })[0];
+    var rows = [], row = [], field = "", q = false;
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (q) {
+        if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (ch === '"') q = false;
+        else field += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === delim) { row.push(field); field = ""; }
+      else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        if (row.some(function (c) { return c.trim(); })) rows.push(row);
+        row = [];
+      } else field += ch;
+    }
+    row.push(field);
+    if (row.some(function (c) { return c.trim(); })) rows.push(row);
+    return rows;
+  }
+
+  function readPlotList(text) {
+    var rows = parseCsv(text);
+    if (!rows.length) throw new Error("The file is empty.");
+    var head = rows[0].map(function (h) { return h.trim().toLowerCase(); });
+    var find = function (re) { for (var i = 0; i < head.length; i++) if (re.test(head[i])) return i; return -1; };
+    var iPlot = find(/plot|sample|^id$|^entry_?id$/);
+    var hasHeader = iPlot !== -1 || head.some(function (h) { return /genotype|entry|variety|rep|trial/.test(h); });
+    if (iPlot === -1) iPlot = 0;
+    var iGen = find(/genotype|entry|variety|line|cultivar|accession|pedigree|hybrid/);
+    var iRep = find(/^rep|replicat|block/);
+    var iTrial = find(/trial|experiment|location|site/);
+    var seen = {}, out = [];
+    rows.slice(hasHeader ? 1 : 0).forEach(function (r) {
+      var plot = (r[iPlot] || "").trim();
+      if (!plot || seen[plot.toLowerCase()]) return;
+      seen[plot.toLowerCase()] = 1;
+      out.push({
+        plot: plot,
+        genotype: iGen >= 0 && iGen !== iPlot ? (r[iGen] || "").trim() : "",
+        rep: iRep >= 0 ? (r[iRep] || "").trim() : "",
+        trial: iTrial >= 0 ? (r[iTrial] || "").trim() : ""
+      });
+    });
+    if (!out.length) throw new Error("No plot IDs found. The file needs a column named plot.");
+    return out;
+  }
+
+  function plotList() { return settings.plots || []; }
+  function findPlot(id) {
+    var k = String(id || "").trim().toLowerCase();
+    if (!k) return null;
+    var list = plotList();
+    for (var i = 0; i < list.length; i++) if (list[i].plot.toLowerCase() === k) return list[i];
+    return null;
+  }
+  function nextPlotAfter(id) {
+    var list = plotList();
+    if (!list.length) return null;
+    var k = String(id || "").trim().toLowerCase();
+    for (var i = 0; i < list.length; i++) if (list[i].plot.toLowerCase() === k) return list[i + 1] || null;
+    return null;
+  }
+
+  function fillPlotOptions() {
+    $("plotOptions").innerHTML = plotList().slice(0, 3000).map(function (p) {
+      return '<option value="' + esc(p.plot) + '">' + esc([p.genotype, p.rep && "Rep " + p.rep].filter(Boolean).join(" · ")) + "</option>";
+    }).join("");
+  }
+
+  var autoGenotype = "";
+  function applyPlot() {
+    var hint = $("plotHint");
+    var id = $("fPlot").value.trim();
+    var p = findPlot(id);
+    var done = id ? allRecords.filter(function (r) { return (r.meta.plot || "").toLowerCase() === id.toLowerCase(); }).length : 0;
+    var bits = [];
+    if (p) {
+      // Fill from the plot list, but never overwrite something the person typed
+      if (p.genotype && (!$("fGenotype").value || $("fGenotype").value === autoGenotype)) { $("fGenotype").value = p.genotype; autoGenotype = p.genotype; }
+      if (p.rep && /^\d+$/.test(p.rep) && document.activeElement !== $("fRep")) $("fRep").value = p.rep;
+      if (p.trial && !$("fTrial").value) { $("fTrial").value = p.trial; updateContext(); }
+      bits.push("✓ In plot list" + (p.genotype ? " · " + p.genotype : "") + (p.rep ? " · Rep " + p.rep : ""));
+    } else if (id && plotList().length) {
+      bits.push("Not in your plot list. Check the ID.");
+    }
+    if (done) bits.push(done + (done === 1 ? " leaf" : " leaves") + " already saved for this plot");
+    hint.textContent = bits.join(" · ");
+    hint.className = "hint" + (p ? " ok" : (id && plotList().length ? " warn" : ""));
+    hint.hidden = !bits.length;
+  }
+  $("fPlot").addEventListener("input", applyPlot);
+  $("fPlot").addEventListener("change", applyPlot);
+
+  $("nextPlotBtn").addEventListener("click", function () {
+    $("fPlot").value = $("nextPlotBtn").dataset.plot || "";
+    $("fLeaf").value = "1";
+    applyPlot();
+    $("camInput").click();
+  });
+
+  function renderPlotSettings() {
+    var list = plotList();
+    $("plotListInfo").innerHTML = list.length
+      ? "<b>" + list.length + " plots</b> loaded from <span class=\"num\">" + esc(settings.plotFile || "CSV") + "</span>" +
+        (list.some(function (p) { return p.genotype; }) ? " · with genotypes" : "") + (list.some(function (p) { return p.rep; }) ? " · with reps" : "")
+      : '<span class="muted">No plot list loaded.</span>';
+    $("clearPlots").hidden = !list.length;
+  }
+
+  $("plotFile").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    f.text().then(function (text) {
+      var list = readPlotList(text);
+      settings.plots = list; settings.plotFile = f.name;
+      Settings.save(settings);
+      fillPlotOptions(); renderPlotSettings(); applyPlot();
+      toast(list.length + " plots loaded");
+    }).catch(function (e) { toast("Could not read the plot list: " + e.message); });
+  });
+  $("clearPlots").addEventListener("click", function () {
+    settings.plots = []; settings.plotFile = "";
+    Settings.save(settings);
+    fillPlotOptions(); renderPlotSettings(); applyPlot();
+    toast("Plot list removed");
+  });
+
+  function renderProgress(all) {
+    var list = plotList();
+    var trial = $("trialFilter").value;
+    if (trial) list = list.filter(function (p) { return !p.trial || p.trial === trial; });
+    $("plotProgress").hidden = !list.length;
+    if (!list.length) return;
+    var scored = {};
+    all.forEach(function (r) { if (!trial || r.meta.trial === trial) scored[(r.meta.plot || "").toLowerCase()] = 1; });
+    var missing = list.filter(function (p) { return !scored[p.plot.toLowerCase()]; });
+    var done = list.length - missing.length;
+    $("progText").textContent = done + " / " + list.length;
+    $("progBar").style.width = (done / list.length * 100) + "%";
+    $("missingList").textContent = missing.length ? missing.slice(0, 300).map(function (p) { return p.plot; }).join(", ") + (missing.length > 300 ? " … and " + (missing.length - 300) + " more" : "") : "All plots scored.";
+  }
+  $("missingBtn").addEventListener("click", function () {
+    var open = $("missingList").hidden;
+    $("missingList").hidden = !open;
+    $("missingBtn").textContent = open ? "Hide list" : "Show plots not scored yet";
+  });
+
+  // ---------- summary by genotype / plot ----------
+  var recMode = "leaves", groupBy = "genotype", lastSummary = [];
+  function mean(a) { return a.reduce(function (x, y) { return x + y; }, 0) / a.length; }
+  function stderr(a) {
+    if (a.length < 2) return null;
+    var m = mean(a);
+    return Math.sqrt(a.reduce(function (x, y) { return x + (y - m) * (y - m); }, 0) / (a.length - 1)) / Math.sqrt(a.length);
+  }
+  function natural(a, b) { return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }); }
+
+  function summarizeRecords(list, by) {
+    var plots = {};
+    list.forEach(function (r) {
+      var key = (r.meta.trial || "") + "|" + (r.meta.plot || r.id);
+      var p = plots[key] || (plots[key] = { plot: r.meta.plot || "(no plot ID)", genotype: r.meta.genotype || "", rep: r.meta.rep || "", trial: r.meta.trial || "", scores: [], dis: [] });
+      if (!p.genotype && r.meta.genotype) p.genotype = r.meta.genotype;
+      p.scores.push(r.result.score); p.dis.push(r.result.diseasedPct);
+    });
+    var plotRows = Object.keys(plots).map(function (k) {
+      var p = plots[k];
+      return { label: p.plot, genotype: p.genotype, rep: p.rep, trial: p.trial, plots: 1, leaves: p.scores.length,
+        score: mean(p.scores), scoreSe: stderr(p.scores), dis: mean(p.dis), disSe: stderr(p.dis) };
+    });
+    if (by === "plot") return plotRows.sort(function (a, b) { return natural(a.label, b.label); });
+    var gen = {};
+    plotRows.forEach(function (p) {
+      var g = gen[p.genotype || "(no genotype)"] || (gen[p.genotype || "(no genotype)"] = { s: [], d: [], leaves: 0 });
+      g.s.push(p.score); g.d.push(p.dis); g.leaves += p.leaves;
+    });
+    return Object.keys(gen).map(function (k) {
+      var g = gen[k];
+      return { label: k, plots: g.s.length, leaves: g.leaves, score: mean(g.s), scoreSe: stderr(g.s), dis: mean(g.d), disSe: stderr(g.d) };
+    }).sort(function (a, b) { return a.score - b.score || natural(a.label, b.label); });
+  }
+
+  function fmtSe(v, d) { return v == null ? "" : ' <span class="se">±' + v.toFixed(d) + "</span>"; }
+  function renderSummary(list) {
+    var rows = lastSummary = summarizeRecords(list, groupBy);
+    var dot = function (sc) { return '<span class="score-dot" style="background:' + scoreColor(Math.min(9, Math.max(1, Math.round(sc)))) + '"></span>'; };
+    var head = groupBy === "genotype"
+      ? "<tr><th>Genotype</th><th>Plots</th><th>Leaves</th><th>Score</th><th>Diseased %</th></tr>"
+      : "<tr><th>Plot</th><th>Genotype</th><th>Rep</th><th>Leaves</th><th>Score</th><th>Diseased %</th></tr>";
+    $("sumTable").innerHTML = "<thead>" + head + "</thead><tbody>" + (rows.length ? rows.map(function (r) {
+      var cells = groupBy === "genotype"
+        ? [esc(r.label), r.plots, r.leaves]
+        : [esc(r.label), '<span style="font-family:var(--font-body)">' + esc(r.genotype || "–") + "</span>", esc(r.rep || "–"), r.leaves];
+      return "<tr><td>" + cells.join("</td><td>") + "</td><td>" + dot(r.score) + r.score.toFixed(1) + fmtSe(r.scoreSe, 1) + "</td><td>" + r.dis.toFixed(1) + fmtSe(r.disSe, 1) + "</td></tr>";
+    }).join("") : '<tr><td colspan="6" class="muted">No records match.</td></tr>') + "</tbody>";
+    $("sumNote").textContent = groupBy === "genotype"
+      ? "Leaves are averaged within each plot first; genotype values are means of plot means, ± standard error across plots. Sorted from most resistant. Uses the search and trial filter above."
+      : "Mean of the leaves scored in each plot, ± standard error across leaves. Uses the search and trial filter above.";
+  }
+
+  document.querySelectorAll("#recMode button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      recMode = b.dataset.mode;
+      document.querySelectorAll("#recMode button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      renderRecords();
+    });
+  });
+  document.querySelectorAll("#groupBy button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      groupBy = b.dataset.group;
+      document.querySelectorAll("#groupBy button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      renderRecords();
+    });
+  });
+  $("exportSummary").addEventListener("click", function () {
+    if (!lastSummary.length) { toast("Nothing to export yet"); return; }
+    var cols = groupBy === "genotype"
+      ? ["Genotype", "Plots", "Leaves", "Mean_BLS_Score", "SE_BLS_Score", "Mean_Diseased_Percent", "SE_Diseased_Percent"]
+      : ["Plot_ID", "Genotype", "Rep", "Trial", "Leaves", "Mean_BLS_Score", "SE_BLS_Score", "Mean_Diseased_Percent", "SE_Diseased_Percent"];
+    var r2 = function (v) { return v == null ? "" : (Math.round(v * 100) / 100); };
+    var lines = [cols.join(",")].concat(lastSummary.map(function (r) {
+      var v = groupBy === "genotype" ? [r.label, r.plots, r.leaves] : [r.label, r.genotype, r.rep, r.trial, r.leaves];
+      return v.concat([r2(r.score), r2(r.scoreSe), r2(r.dis), r2(r.disSe)]).map(csvCell).join(",");
+    }));
+    shareOrDownload(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" }), "BLS_summary_by_" + groupBy + "_" + trialTag() + today() + ".csv", "text/csv", "Summary exported");
+  });
+
+  // ---------- backup + restore ----------
+  function backupStatus(msg, ok) { var s2 = $("backupStatus"); s2.textContent = msg; s2.className = "status-line " + (ok ? "ok" : "err"); }
+
+  $("backupBtn").addEventListener("click", function () {
+    if (!window.JSZip) { backupStatus("Backup is not available in this browser.", false); return; }
+    backupStatus("Preparing backup…", true);
+    Records.all().then(function (all) {
+      if (!all.length) { backupStatus("There are no records to back up yet.", false); return null; }
+      var zip = new JSZip();
+      var list = all.slice().reverse();
+      zip.file("BLS_results.csv", buildCsv(list));
+      zip.file("backup.json", JSON.stringify({
+        app: "BLS Leaf Scorer", appVersion: APP_VERSION, engineVersion: E.VERSION, exportedAt: new Date().toISOString(),
+        records: list.map(function (r) {
+          var c = Object.assign({}, r);
+          delete c.photo; delete c.overlay;
+          c.photoFile = r.photo ? "photos/" + r.id + "_photo.jpg" : null;
+          c.overlayFile = r.overlay ? "overlays/" + r.id + "_overlay.jpg" : null;
+          return c;
+        })
+      }, null, 1));
+      list.forEach(function (r) {
+        if (r.photo) zip.file("photos/" + r.id + "_photo.jpg", r.photo);
+        if (r.overlay) zip.file("overlays/" + r.id + "_overlay.jpg", r.overlay);
+      });
+      // JPEGs are already compressed, so store them as they are (much faster)
+      return zip.generateAsync({ type: "blob", compression: "STORE", mimeType: "application/zip" }).then(function (blob) {
+        backupStatus("✓ Backup of " + list.length + " records (" + (blob.size / 1e6).toFixed(1) + " MB) ready.", true);
+        return shareOrDownload(blob, "BLS_backup_" + today() + ".zip", "application/zip");
+      });
+    }).catch(function (e) { backupStatus("Backup failed: " + e.message, false); });
+  });
+
+  $("restoreFile").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    if (!window.JSZip) { backupStatus("Restore is not available in this browser.", false); return; }
+    backupStatus("Reading backup…", true);
+    var added = 0, skipped = 0;
+    JSZip.loadAsync(f).then(function (zip) {
+      var j = zip.file("backup.json");
+      if (!j) throw new Error("this is not a BLS Leaf Scorer backup (backup.json is missing)");
+      return j.async("string").then(function (txt) {
+        var data = JSON.parse(txt);
+        return Records.all().then(function (existing) {
+          var have = {};
+          existing.forEach(function (r) { have[r.id] = 1; });
+          var chain = Promise.resolve();
+          (data.records || []).forEach(function (r) {
+            if (!r || !r.id || !r.result || !r.meta) return;
+            if (have[r.id]) { skipped++; return; }
+            chain = chain.then(function () {
+              var get = function (path) {
+                var zf = path && zip.file(path);
+                return zf ? zf.async("blob").then(function (b) { return new Blob([b], { type: "image/jpeg" }); }) : Promise.resolve(null);
+              };
+              return Promise.all([get(r.photoFile), get(r.overlayFile)]).then(function (b) {
+                var rec = Object.assign({}, r, { photo: b[0], overlay: b[1] });
+                delete rec.photoFile; delete rec.overlayFile;
+                if (rec.sync !== "synced") rec.sync = settings.destination === "local" ? "local" : "pending";
+                added++;
+                return Records.put(rec);
+              });
+            });
+          });
+          return chain;
+        });
+      });
+    }).then(function () {
+      backupStatus("✓ Restored " + added + " record" + (added === 1 ? "" : "s") + (skipped ? " (" + skipped + " were already on this phone)" : "") + ".", true);
+      refreshPending(); syncPending();
+    }).catch(function (e) { backupStatus("Could not restore: " + e.message, false); });
+  });
+
   // ---------- method table ----------
   function renderMethod() {
     $("engVer").textContent = E.VERSION;
@@ -813,6 +1233,7 @@
   }
 
   // ---------- start ----------
+  fillPlotOptions();
   updateHeader();
   renderMethod();
   updateContext();

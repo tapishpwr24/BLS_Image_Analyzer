@@ -23,7 +23,8 @@
     "Healthy_Percent", "Chlorotic_Percent", "Necrotic_Percent", "Total_Diseased_Percent",
     "BLS_Score", "Disease_Response", "QC_Status",
     "Latitude", "Longitude", "GPS_Accuracy_m", "Notes",
-    "Image_Width", "Image_Height", "Engine_Version", "Device", "Photo_URL", "Overlay_URL"
+    "Image_Width", "Image_Height", "Engine_Version", "Device", "Photo_URL", "Overlay_URL",
+    "Sections", "Edited_At"
   ];
 
   function postJson(url, body, headers, plain) {
@@ -105,7 +106,7 @@
         var url = requireUrl(cfg, "url");
         var h = {}; if (cfg.header && cfg.token) h[cfg.header] = cfg.token;
         return postJson(url, {
-          event: "record", columns: COLUMNS, row: payload.row,
+          event: payload.event || "record", columns: COLUMNS, row: payload.row,
           photo_jpeg_base64: payload.photo, overlay_jpeg_base64: payload.overlay
         }, h);
       }

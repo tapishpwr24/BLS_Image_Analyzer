@@ -117,15 +117,20 @@
       };
     }
 
+    var out = summarize(nLeaf, nHealthy, nChl, nNec);
+    out.width = width;
+    out.height = height;
+    out.mask = mask;
+    return out;
+  }
+
+  // Percentages, score and QC from pixel counts (shared by analyze and combine)
+  function summarize(nLeaf, nHealthy, nChl, nNec) {
     var pH = nHealthy / nLeaf, pC = nChl / nLeaf, pN = nNec / nLeaf;
     var diseasedPct = (pC + pN) * 100;
     var score = blsScore(diseasedPct);
-
     return {
       ok: true,
-      width: width,
-      height: height,
-      mask: mask,
       leafPixels: nLeaf,
       healthyPixels: nHealthy,
       chloroticPixels: nChl,
@@ -138,6 +143,20 @@
       category: category(score),
       qc: Math.abs(pH + pC + pN - 1) < 0.0001 ? "PASS" : "CHECK"
     };
+  }
+
+  /*
+   * Long leaves photographed in sections: pixel counts are added up, so the
+   * combined score is what one photo of the whole leaf would have given.
+   */
+  function combine(results) {
+    var t = { l: 0, h: 0, c: 0, n: 0 };
+    results.forEach(function (r) {
+      t.l += r.leafPixels; t.h += r.healthyPixels; t.c += r.chloroticPixels; t.n += r.necroticPixels;
+    });
+    var out = summarize(t.l, t.h, t.c, t.n);
+    out.sections = results.length;
+    return out;
   }
 
   /*
@@ -169,6 +188,7 @@
     blsScore: blsScore,
     category: category,
     analyze: analyze,
+    combine: combine,
     overlay: overlay
   };
 });

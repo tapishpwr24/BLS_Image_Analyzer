@@ -283,10 +283,33 @@ textarea { min-height: 70px; resize: vertical; }
 .kv div { display: grid; gap: 1px; min-width: 0; }
 .kv dt { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); }
 .kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
-.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sheet-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
 .btn-danger { background: transparent; border-color: var(--necrotic); color: var(--necrotic); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(30px); opacity: 0; } }
+
+/* ---------- sections (long leaves) ---------- */
+.sections { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sec-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 6px 6px 11px; border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 600; }
+.sec-chip button { border: 0; background: var(--surface); width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 14px; line-height: 1; color: var(--ink-2); }
+.add-sec { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px dashed var(--accent); color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; }
+.add-sec svg { width: 16px; height: 16px; }
+.field .hint.ok { color: var(--healthy); }
+.field .hint.warn { color: var(--necrotic); }
+
+/* ---------- summary + progress ---------- */
+.progress { display: grid; gap: 8px; }
+.progress-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.progress-bar { height: 10px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.progress-bar i { display: block; height: 100%; background: var(--healthy); border-radius: 6px; transition: width 0.5s ease; }
+.missing { font: 500 12px/1.6 var(--font-data); color: var(--ink-2); overflow-wrap: anywhere; margin: 0; }
+.table-wrap { overflow-x: auto; margin: 0 -4px; }
+.sum-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 330px; }
+.sum-table th { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-2); text-align: right; padding: 6px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.sum-table td { padding: 9px 4px; border-bottom: 1px solid var(--line); text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sum-table th:first-child, .sum-table td:first-child { text-align: left; font-family: var(--font-body); font-weight: 600; white-space: normal; }
+.sum-table .se { color: var(--ink-2); font-size: 11px; }
+.score-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 
 /* ---------- settings ---------- */
 .dest-list { display: grid; gap: 8px; }
@@ -428,6 +451,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </label>
         <button class="btn btn-ghost" type="button" id="viewRecordsBtn">Records</button>
       </div>
+      <button class="link-btn" type="button" id="nextPlotBtn" hidden></button>
     </div>
 
     <article id="result" hidden class="view">
@@ -465,14 +489,18 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <span class="small muted num" id="dims"></span>
         </div>
         <div class="leaf-frame" id="leafFrame"><canvas id="leafCanvas"></canvas></div>
-        <p class="small muted" style="margin:0">Green healthy · yellow chlorotic · red necrotic. Swipe to see the whole leaf. If the colours look wrong, retake the photo.</p>
+        <div class="sections" id="sections"></div>
+        <input id="secInput" type="file" accept="image/*" capture="environment" hidden>
+        <p class="small muted" style="margin:0">Green healthy · yellow chlorotic · red necrotic. Leaf too long for one photo? Use <b>Add section</b> to photograph the rest; the score covers all sections.</p>
       </div>
 
       <form class="card form" id="metaForm" autocomplete="off">
         <h3>Save this leaf</h3>
         <div class="field">
           <label for="fPlot">Plot / sample ID</label>
-          <input id="fPlot" class="input-lg" type="text" required placeholder="e.g. P-1042" enterkeyhint="done">
+          <input id="fPlot" class="input-lg" type="text" required placeholder="e.g. P-1042" enterkeyhint="done" list="plotOptions">
+          <datalist id="plotOptions"></datalist>
+          <span class="hint" id="plotHint" hidden></span>
         </div>
         <div class="row2">
           <div class="field"><span class="label" id="repLbl">Rep</span>
@@ -510,16 +538,29 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 
   <!-- RECORDS -->
   <section class="view" id="view-records" aria-label="Records" hidden>
-    <div><div class="eyebrow">Saved on this phone</div><h2>Records</h2></div>
+    <div style="display:flex;justify-content:space-between;align-items:end;gap:10px;flex-wrap:wrap">
+      <div><div class="eyebrow">Saved on this phone</div><h2>Records</h2></div>
+      <div class="seg" role="group" aria-label="Records view" id="recMode">
+        <button type="button" data-mode="leaves" aria-pressed="true">Leaves</button>
+        <button type="button" data-mode="summary" aria-pressed="false">Summary</button>
+      </div>
+    </div>
     <div class="filters">
       <input id="recSearch" type="search" placeholder="Search plot, genotype, notes" aria-label="Search records">
       <select id="trialFilter" aria-label="Trial"><option value="">All trials</option></select>
+    </div>
+    <div class="card progress" id="plotProgress" hidden>
+      <div class="progress-top"><span class="eyebrow">Plots scored</span><b class="num" id="progText"></b></div>
+      <div class="progress-bar"><i id="progBar" style="width:0"></i></div>
+      <button class="link-btn" type="button" id="missingBtn" style="justify-self:start;padding:0">Show plots not scored yet</button>
+      <p class="missing" id="missingList" hidden></p>
     </div>
     <div class="stats">
       <div class="stat"><span class="eyebrow">Leaves</span><b class="num" id="stN">0</b></div>
       <div class="stat"><span class="eyebrow">Mean score</span><b class="num" id="stMean">–</b></div>
       <div class="stat"><span class="eyebrow">Diseased</span><b class="num" id="stDis">–</b></div>
     </div>
+    <div id="leavesPane" class="view">
     <div class="card">
       <div class="eyebrow">Score distribution</div>
       <div class="hist" id="hist"></div>
@@ -535,6 +576,21 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3c-4 5-5 10-5 13 0 2.5 2.2 5 5 5s5-2.5 5-5c0-3-1-8-5-13z"/><path d="M12 8v13"/></svg>
       <h3 id="emptyTitle">No records yet</h3>
       <p class="muted small" style="margin:0" id="emptyText">Score a leaf on the Analyze tab and tap Save record. Records stay on this phone and sync when you're online.</p>
+    </div>
+    </div>
+
+    <div id="summaryPane" class="view" hidden>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="seg" role="group" aria-label="Group by" id="groupBy">
+            <button type="button" data-group="genotype" aria-pressed="true">By genotype</button>
+            <button type="button" data-group="plot" aria-pressed="false">By plot</button>
+          </div>
+          <button class="link-btn" type="button" id="exportSummary">Export summary CSV</button>
+        </div>
+        <div class="table-wrap"><table class="sum-table" id="sumTable"></table></div>
+        <p class="small muted" style="margin:0" id="sumNote"></p>
+      </div>
     </div>
   </section>
 
@@ -560,6 +616,28 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       </div>
       <label class="check"><input id="dPhotos" type="checkbox" checked> Upload photos and overlays (uses more data)</label>
       <button class="btn btn-soft" type="button" id="saveDefaults">Save defaults</button>
+    </div>
+
+    <div class="card">
+      <h3>Plot list</h3>
+      <p class="small muted" style="margin:0">Load your field book as a CSV with a plot column, and optionally genotype, rep and trial. Plot IDs then autocomplete, genotype and rep fill in by themselves, and Records shows which plots are still to do.</p>
+      <div class="small" id="plotListInfo"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <label class="btn btn-soft" for="plotFile">Load plot list (CSV)</label>
+        <button class="btn btn-ghost" type="button" id="clearPlots" hidden>Remove list</button>
+      </div>
+      <input id="plotFile" type="file" accept=".csv,text/csv,text/plain" hidden>
+    </div>
+
+    <div class="card">
+      <h3>Backup and restore</h3>
+      <p class="small muted" style="margin:0">One ZIP file with every record, photo and overlay, plus the CSV. Keep it on Drive or a computer, or restore it on another phone.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" type="button" id="backupBtn">Back up everything</button>
+        <label class="btn btn-ghost" for="restoreFile">Restore from backup</label>
+      </div>
+      <input id="restoreFile" type="file" accept=".zip,application/zip" hidden>
+      <div class="status-line" id="backupStatus" role="status"></div>
     </div>
 
     <div class="card">
@@ -602,6 +680,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 <div id="sheetRoot"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
 <script src="engine.js"></script>
 <script src="store.js"></script>
 <script src="connectors/connectors.js"></script>

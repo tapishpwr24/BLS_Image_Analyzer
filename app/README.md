@@ -12,6 +12,15 @@ saved on the phone and copied to storage the user chooses.
 - **Install it like an app.** It's a Progressive Web App, so there's no app store. Open the link,
   then *Add to Home Screen*.
 
+## Features
+
+- **Score a leaf** from a camera or gallery photo: BLS score 1–9, diseased leaf area, category, and a colour overlay to check the classification.
+- **Long leaves:** tap *Add section* to photograph the rest of the leaf. Pixel counts from all sections are added up, so the score covers the whole leaf (`Sections` column).
+- **Plot list:** load your field book (a CSV with a `plot` column, plus optional genotype/entry, rep and trial). Plot IDs then autocomplete, genotype and rep fill in, the app warns about unknown or already-scored plots, offers *Next plot in list* after saving, and shows *Plots scored 34 / 120* with the list still to do.
+- **Edit a saved record** (plot, genotype, rep, leaf, trial, rater, notes). The score comes from the photo and can't be edited. Edits are re-synced, with `Edited_At` set and webhook event `update`.
+- **Summary** by genotype (means of plot means ± SE across plots, most resistant first) or by plot (± SE across leaves), exportable as CSV.
+- **Backup and restore:** one ZIP with `BLS_results.csv`, `backup.json`, and all photos and overlays. Restoring onto another phone skips records it already has.
+
 ## Run it locally
 
 ```bash
