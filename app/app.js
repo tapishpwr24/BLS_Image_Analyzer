@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.9.1";
+  var APP_VERSION = "0.9.2";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -258,7 +258,10 @@
     settings.finderError = e ? String(e && e.message || e).slice(0, 200) : "";
     settings.finderOk = !e;
     Settings.save(settings);
-    try { if (e) localStorage.setItem("bls-sam-threads", "1"); } catch (x) { /* ignore */ }
+    try {
+      if (e) localStorage.setItem("bls-sam-threads", "1");
+      else localStorage.removeItem("bls-sam-threads");   // worked: try all CPU cores again next time
+    } catch (x) { /* ignore */ }
   }
 
   $("secInput").addEventListener("change", function (ev) {

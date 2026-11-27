@@ -23,23 +23,31 @@ let ort = null;
 let sessions = null;
 let loading = null;
 
-// Download with progress so the first use can show "Downloading leaf finder… 40%"
-async function fetchBytes(url, onBytes) {
+// Download with progress so the first use can show "Downloading leaf finder… 40%".
+// Chunks are collected and joined at the end: the server's content-length can be
+// the *compressed* size (GitHub Pages gzips files), so it can't size the buffer.
+async function fetchBytes(url, onBytes, expected) {
   const res = await fetch(url);
   if (!res.ok) throw new Error("Could not download the leaf finder (" + res.status + ")");
-  const total = +res.headers.get("content-length") || 0;
-  if (!res.body || !total) { const b = new Uint8Array(await res.arrayBuffer()); onBytes(b.length, b.length); return b; }
+  if (!res.body || !res.body.getReader) {
+    const b = new Uint8Array(await res.arrayBuffer());
+    onBytes(b.length, b.length);
+    return b;
+  }
   const reader = res.body.getReader();
-  const out = new Uint8Array(total);
+  const chunks = [];
   let got = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    out.set(value, got);
+    chunks.push(value);
     got += value.length;
-    onBytes(got, total);
+    onBytes(Math.min(got, expected), expected);
   }
-  return got === total ? out : out.slice(0, got);
+  const out = new Uint8Array(got);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
 }
 
 export function isLoaded() { return !!sessions; }
@@ -60,8 +68,8 @@ export function load(onProgress) {
     const done = [0, 0];
     const report = () => onProgress && onProgress((done[0] + done[1]) / (sizes[0] + sizes[1]));
     const [encBytes, decBytes] = await Promise.all([
-      fetchBytes(MODEL_DIR + "vision_encoder_quantized.onnx", (g) => { done[0] = g; report(); }),
-      fetchBytes(MODEL_DIR + "prompt_encoder_mask_decoder_quantized.onnx", (g) => { done[1] = g; report(); })
+      fetchBytes(MODEL_DIR + "vision_encoder_quantized.onnx", (g) => { done[0] = g; report(); }, sizes[0]),
+      fetchBytes(MODEL_DIR + "prompt_encoder_mask_decoder_quantized.onnx", (g) => { done[1] = g; report(); }, sizes[1])
     ]);
     const opts = { executionProviders: ["wasm"], graphOptimizationLevel: "all" };
     sessions = {
