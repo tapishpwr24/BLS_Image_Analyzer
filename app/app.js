@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.8.0";
+  var APP_VERSION = "0.9.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -125,7 +125,7 @@
   function analyzeSection(sec, found) {
     var roi = found && found.roi ? found.roi : null;
     var d = sec.imageData;
-    var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined, settings.rules === "r1" ? "r1" : "v2");
+    var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined, currentRules());
     sec.result = res;
     sec.roi = roi || null;
     sec.found = found || null;
@@ -160,6 +160,14 @@
     var per = [];
     secs.forEach(function (x) { if (x.perLeaf) per = per.concat(x.perLeaf); });
     current.result.perLeaf = per.length > 1 ? per : null;
+    // Lesions across sections: counts add up; mean size weighted by count
+    var lc = 0, lsum = 0, lmax = 0;
+    secs.forEach(function (x) {
+      var L = x.result.lesions; if (!L) return;
+      lc += L.count; lsum += L.count * L.meanSizePct * x.result.leafPixels; lmax = Math.max(lmax, L.largestPct * x.result.leafPixels);
+    });
+    var leafTot = secs.reduce(function (a, x) { return a + x.result.leafPixels; }, 0);
+    current.result.lesions = { count: lc, meanSizePct: lc ? Math.round(lsum / lc / leafTot * 100) / 100 : 0, largestPct: Math.round(lmax / leafTot * 100) / 100 };
   }
 
   function handleFile(blob, name, isSample, asExample, append) {
@@ -269,6 +277,7 @@
     html += '<button class="add-sec solid" type="button" data-outline>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
       "Adjust leaf edges" + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
+    html += '<button class="add-sec solid" type="button" data-teach><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 20c2-1 3-3 5-5l8-8a2 2 0 0 1 3 3l-8 8c-2 2-4 3-5 5z"/></svg>Teach colours</button>';
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
@@ -403,7 +412,9 @@
         return '<span class="leaf-chip"><i class="mini-score num" style="background:' + scoreColor(q.score) + '">' + q.score + "</i>Leaf " + (i + 1) + ' <b class="num">' + fmtPct(q.diseasedPct) + "</b></span>";
       }).join("");
     }
-    $("methodNote").textContent = ({ board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
+    var L = r.lesions;
+    $("lesionLine").innerHTML = L && L.count ? "<b>" + L.count + "</b> lesion" + (L.count === 1 ? "" : "s") + " · average size <b>" + L.meanSizePct.toFixed(2) + "%</b> of leaf · largest <b>" + L.largestPct.toFixed(1) + "%</b>" : "";
+    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
       "auto + taps": "Leaf found automatically, adjusted by you", traced: "Leaf outlined by you", "whole photo": "Whole photo scored as leaf", mixed: "Sections separated in different ways" })[r.segmentation] || "";
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
@@ -478,7 +489,8 @@
     var r = current.result;
     var meta = {
       trial: $("fTrial").value.trim(), plot: $("fPlot").value.trim(), genotype: $("fGenotype").value.trim(),
-      rep: $("fRep").value.trim(), leaf: $("fLeaf").value.trim(), rater: $("fRater").value.trim(), notes: $("fNotes").value.trim()
+      rep: $("fRep").value.trim(), leaf: $("fLeaf").value.trim(), rater: $("fRater").value.trim(), notes: $("fNotes").value.trim(),
+      visual: $("fVisual").value.trim()
     };
     // Remember trial and rater for the next leaf
     settings.trial = meta.trial; settings.rater = meta.rater;
@@ -496,7 +508,8 @@
             necroticPct: r.necroticPct, diseasedPct: r.diseasedPct, score: r.score, category: r.category,
             qc: r.qc, width: r.width, height: r.height, sections: r.sections || 1,
             segmentation: r.segmentation || "whole photo", rules: r.rules || "v2",
-            perLeaf: r.perLeaf ? r.perLeaf.map(function (q) { return { diseasedPct: q.diseasedPct, score: q.score }; }) : null
+            perLeaf: r.perLeaf ? r.perLeaf.map(function (q) { return { diseasedPct: q.diseasedPct, score: q.score }; }) : null,
+            lesions: r.lesions || null
           },
           engine: E.VERSION, photo: blobs[0], overlay: blobs[1],
           sync: settings.destination === "local" ? "local" : "pending", syncError: null, remote: {}
@@ -511,6 +524,7 @@
         $("savedText").textContent = [meta.rep && "Rep " + meta.rep, meta.leaf && "Leaf " + meta.leaf, "Score " + r.score, fmtPct(r.diseasedPct) + " diseased"].filter(Boolean).join(" · ") + ". " + where;
         // Ready for the next leaf from the same plot: keep plot, trial, rater; bump leaf no.
         $("fNotes").value = "";
+        $("fVisual").value = "";
         $("fLeaf").value = String((parseInt($("fLeaf").value, 10) || 0) + 1);
         $("nextLeafLabel").textContent = "Next leaf (" + $("fLeaf").value + ")";
         var np = nextPlotAfter(meta.plot);
@@ -542,9 +556,11 @@
       Device: "BLS Leaf Scorer " + APP_VERSION,
       Photo_URL: (rec.remote && rec.remote.photoUrl) || "", Overlay_URL: (rec.remote && rec.remote.overlayUrl) || "",
       Sections: r.sections || 1, Edited_At: rec.editedAt || "", Segmentation: r.segmentation || "whole photo",
-      Rules: r.rules === "r1" ? "R script v1.0" : "calibrated v2", Leaf_Count: r.perLeaf ? r.perLeaf.length : 1,
+      Rules: r.rules === "r1" ? "R script v1.0" : r.rules === "taught" ? "taught colours" : "calibrated v2", Leaf_Count: r.perLeaf ? r.perLeaf.length : 1,
       Per_Leaf_Diseased_Percent: r.perLeaf ? r.perLeaf.map(function (q) { return q.diseasedPct; }).join("; ") : "",
-      Per_Leaf_BLS_Score: r.perLeaf ? r.perLeaf.map(function (q) { return q.score; }).join("; ") : ""
+      Per_Leaf_BLS_Score: r.perLeaf ? r.perLeaf.map(function (q) { return q.score; }).join("; ") : "",
+      Lesion_Count: r.lesions ? r.lesions.count : "", Mean_Lesion_Size_Percent: r.lesions ? r.lesions.meanSizePct : "",
+      Visual_Diseased_Percent: m.visual || ""
     };
   }
 
@@ -654,7 +670,7 @@
       renderProgress(all);
       $("leavesPane").hidden = recMode !== "leaves";
       $("summaryPane").hidden = recMode !== "summary";
-      if (recMode === "summary") renderSummary(list);
+      if (recMode === "summary") { renderSummary(list); renderAgreement(list); }
 
       var n = list.length;
       $("stN").textContent = n;
@@ -711,7 +727,9 @@
     if (m.notes) kv.push(["Notes", m.notes]);
     if (r.sections > 1) kv.push(["Photographed in", r.sections + " sections"]);
     kv.push(["Leaf separated by", segLabel(r.segmentation)]);
-    kv.push(["Scoring rules", r.rules === "r1" ? "R script v1.0" : "Calibrated v2"]);
+    kv.push(["Scoring rules", r.rules === "r1" ? "R script v1.0" : r.rules === "taught" ? "Taught colours" : "Calibrated v2"]);
+    if (r.lesions) kv.push(["Lesions", r.lesions.count + " · average " + r.lesions.meanSizePct + "% of leaf"]);
+    if (m.visual) kv.push(["Visual estimate", m.visual + "%"]);
     if (r.perLeaf) kv.push(["Per leaf", r.perLeaf.map(function (q, i) { return "Leaf " + (i + 1) + ": " + fmtPct(q.diseasedPct) + " (BLS " + q.score + ")"; }).join(" · ")]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
@@ -862,9 +880,16 @@
 
   document.querySelectorAll('input[name="rules"]').forEach(function (r) {
     r.addEventListener("change", function () {
+      if (r.value === "taught" && !taughtModel) {
+        toast("Teach the colours first: under any result, tap Teach colours");
+        if (settings.rules === "taught" && !taughtModel) settings.rules = "v2";
+  $("rules-" + (settings.rules === "r1" ? "r1" : settings.rules === "taught" ? "taught" : "v2")).checked = true;
+  renderTaughtInfo();
+        return;
+      }
       settings.rules = r.value;
       Settings.save(settings);
-      toast(r.value === "r1" ? "New photos use the R script v1.0 rules" : "New photos use the calibrated v2 rules");
+      toast(r.value === "r1" ? "New photos use the R script v1.0 rules" : r.value === "taught" ? "New photos use your taught colours" : "New photos use the calibrated v2 rules");
     });
   });
 
@@ -888,6 +913,7 @@
 
   function setupLink() {
     var payload = { v: 1, d: settings.destination, c: settings.connectors[settings.destination] || {}, t: settings.trial, p: settings.uploadPhotos };
+    if (settings.palette && taughtModel) { payload.k = packPalette(settings.palette); payload.r = settings.rules; }
     return location.origin + location.pathname + "#setup-" + b64url(JSON.stringify(payload));
   }
 
@@ -930,6 +956,7 @@
       settings.connectors[conn.id] = cfg.c || {};
       if (cfg.t) settings.trial = cfg.t;
       if (typeof cfg.p === "boolean") settings.uploadPhotos = cfg.p;
+      if (cfg.k) { try { settings.palette = unpackPalette(cfg.k); taughtModel = E.buildModel(settings.palette); if (cfg.r) settings.rules = cfg.r; } catch (e) { /* ignore a bad palette */ } }
       Settings.save(settings); updateHeader(); refreshPending(); card.remove();
       toast("Joined. Records now go to " + conn.name);
     });
@@ -1282,6 +1309,258 @@
   });
   document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
 
+  // ---------- taught colours (pliman / PlantCV style) ----------
+  var taughtModel = settings.palette ? E.buildModel(settings.palette) : null;
+  function currentRules() {
+    if (settings.rules === "r1") return "r1";
+    if (settings.rules === "taught" && taughtModel) return taughtModel;
+    return "v2";
+  }
+  // Compact form for the team link: only non-zero histogram bins
+  function packPalette(pal) {
+    var out = {};
+    Object.keys(pal.classes).forEach(function (k) {
+      var c = pal.classes[k];
+      out[k] = { n: c.n, h: sparse(c.h), s: sparse(c.s), v: sparse(c.v) };
+    });
+    return { p: pal.photos, c: out };
+  }
+  function sparse(a) { var o = []; a.forEach(function (x, i) { if (x) o.push(i, x); }); return o; }
+  function unpackPalette(o) {
+    var pal = E.emptyPalette();
+    pal.photos = o.p || 0;
+    Object.keys(o.c).forEach(function (k) {
+      var c = pal.classes[k], src = o.c[k];
+      if (!c) return;
+      c.n = src.n;
+      ["h", "s", "v"].forEach(function (ch) { for (var i = 0; i < src[ch].length; i += 2) c[ch][src[ch][i]] = src[ch][i + 1]; });
+    });
+    return pal;
+  }
+  function renderTaughtInfo() {
+    var pal = settings.palette, row = $("rules-taught");
+    row.disabled = !taughtModel;
+    $("resetTaught").hidden = !pal;
+    if (!pal) return;
+    var c = pal.classes;
+    $("taughtInfo").textContent = "Learned from " + pal.photos + " photo" + (pal.photos === 1 ? "" : "s") + ": " +
+      (c[1].n).toLocaleString() + " healthy, " + (c[2].n).toLocaleString() + " chlorotic, " + (c[3].n).toLocaleString() + " necrotic pixels." +
+      (taughtModel ? "" : " Add at least two classes to use them.");
+  }
+  $("resetTaught").addEventListener("click", function () {
+    var b = $("resetTaught");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to forget them"; setTimeout(function () { delete b.dataset.armed; b.textContent = "Forget taught colours"; }, 3000); return; }
+    settings.palette = null; taughtModel = null;
+    if (settings.rules === "taught") settings.rules = "v2";
+    Settings.save(settings);
+    $("rules-v2").checked = settings.rules === "v2";
+    renderTaughtInfo(); renderQr();
+    toast("Taught colours forgotten");
+  });
+
+  var tc = null;   // teach-screen state
+  var CLASS_RGB = { 1: [92, 192, 116], 2: [240, 195, 48], 3: [226, 104, 60] };
+
+  function openTeach() {
+    if (!current) return;
+    var sec = current.sections[current.sections.length - 1];
+    var d = sec.imageData, W = d.width, H = d.height;
+    var base = document.createElement("canvas");
+    base.width = W; base.height = H;
+    var px = new Uint8ClampedArray(d.data);
+    if (sec.roi) for (var i = 0, p = 0; i < sec.roi.length; i++, p += 4) if (!sec.roi[i]) { px[p] *= 0.3; px[p + 1] *= 0.3; px[p + 2] *= 0.3; }
+    base.getContext("2d").putImageData(new ImageData(px, W, H), 0, 0);
+    tc = { sec: sec, W: W, H: H, base: base, strokes: [], cls: 1, view: "photo", painting: null, preview: null };
+    $("teach").hidden = false;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(function () {
+      var stage = $("teachStage"), cv = $("teachCanvas");
+      // long thin leaves lie across the screen so they are big enough to brush
+      tc.rot = H > W * 1.6;
+      var dw = tc.rot ? H : W, dh = tc.rot ? W : H;
+      var k = Math.min((stage.clientWidth - 12) / dw, (stage.clientHeight - 12) / dh);
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      cv.style.width = Math.round(dw * k) + "px"; cv.style.height = Math.round(dh * k) + "px";
+      cv.width = Math.round(dw * k * dpr); cv.height = Math.round(dh * k * dpr);
+      tc.k = k;
+      drawTeach();
+    });
+    setTeachClass(1);
+    updateTeach();
+  }
+  function closeTeach() { $("teach").hidden = true; document.body.style.overflow = ""; tc = null; }
+
+  function setTeachClass(c) {
+    if (!tc) return;
+    tc.cls = c;
+    document.querySelectorAll("#tcClass button").forEach(function (b) { b.setAttribute("aria-pressed", String(+b.dataset.c === c)); });
+  }
+  document.querySelectorAll("#tcClass button").forEach(function (b) { b.addEventListener("click", function () { setTeachClass(+b.dataset.c); if (tc.view !== "photo") setTeachView("photo"); }); });
+  function setTeachView(v) {
+    if (!tc) return;
+    tc.view = v;
+    document.querySelectorAll("#tcView button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === v)); });
+    if (v === "result") previewTeach();
+    drawTeach();
+  }
+  document.querySelectorAll("#tcView button").forEach(function (b) { b.addEventListener("click", function () { setTeachView(b.dataset.v); }); });
+
+  // Saved palette plus what was brushed on this photo
+  function teachPalette() {
+    var pal = settings.palette ? JSON.parse(JSON.stringify(settings.palette)) : E.emptyPalette();
+    var d = tc.sec.imageData;
+    tc.strokes.forEach(function (st) { E.addSamples(pal, d.data, st.idx, st.cls); });
+    return pal;
+  }
+  function previewTeach() {
+    var model = E.buildModel(teachPalette());
+    if (!model) { tc.preview = null; tc.previewText = "Brush at least two kinds of tissue to see a result."; return; }
+    var d = tc.sec.imageData;
+    var res = E.analyze(d.data, d.width, d.height, undefined, tc.sec.roi || undefined, model);
+    if (!res.ok) { tc.preview = null; tc.previewText = res.message; return; }
+    var px = E.overlay(d.data, res.mask, 0.55);
+    if (tc.sec.roi) for (var i = 0, p = 0; i < tc.sec.roi.length; i++, p += 4) if (!tc.sec.roi[i]) { px[p] *= 0.25; px[p + 1] *= 0.25; px[p + 2] *= 0.25; }
+    var c = document.createElement("canvas"); c.width = d.width; c.height = d.height;
+    c.getContext("2d").putImageData(new ImageData(px, d.width, d.height), 0, 0);
+    tc.preview = c;
+    tc.previewText = "With these colours: " + fmtPct(res.diseasedPct) + " diseased (chlorotic " + fmtPct(res.chloroticPct) + ", necrotic " + fmtPct(res.necroticPct) + "), BLS " + res.score + ".";
+  }
+
+  function drawTeach() {
+    if (!tc) return;
+    var cv = $("teachCanvas"), ctx = cv.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    if (tc.rot) { ctx.translate(cv.width, 0); ctx.rotate(Math.PI / 2); }
+    var w = tc.rot ? cv.height : cv.width, h = tc.rot ? cv.width : cv.height;
+    var src = tc.view === "result" && tc.preview ? tc.preview : tc.base;
+    ctx.drawImage(src, 0, 0, w, h);
+    if (tc.view === "photo") {
+      var sx = w / tc.W;
+      tc.strokes.concat(tc.painting ? [tc.painting] : []).forEach(function (st) {
+        var c = CLASS_RGB[st.cls];
+        ctx.strokeStyle = "rgba(" + c.join(",") + ",0.6)";
+        ctx.lineWidth = st.r * 2 * sx; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.beginPath();
+        st.pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0] * sx, q[1] * sx); else ctx.moveTo(q[0] * sx, q[1] * sx); });
+        if (st.pts.length === 1) ctx.lineTo(st.pts[0][0] * sx + 0.1, st.pts[0][1] * sx);
+        ctx.stroke();
+      });
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  function updateTeach() {
+    if (!tc) return;
+    var cnt = { 1: 0, 2: 0, 3: 0 };
+    tc.strokes.forEach(function (st) { cnt[st.cls] += st.idx.length; });
+    var pal = settings.palette;
+    var names = { 1: "Healthy", 2: "Chlorotic", 3: "Necrotic" };
+    var html = [1, 2, 3].map(function (k) {
+      return '<span><i style="background:rgb(' + CLASS_RGB[k].join(",") + ')"></i>' + names[k] + " <b>" + cnt[k].toLocaleString() + "</b>" +
+        (pal && pal.classes[k].n ? " (+" + pal.classes[k].n.toLocaleString() + " earlier)" : "") + "</span>";
+    }).join("");
+    if (tc.view === "result" && tc.previewText) html += '<span style="width:100%;color:#eef4ec">' + esc(tc.previewText) + "</span>";
+    $("tcCounts").innerHTML = html;
+    var model = E.buildModel(teachPalette());
+    $("tcSave").disabled = !tc.strokes.length || !model;
+    $("tcUndo").disabled = !tc.strokes.length;
+    $("tcClear").disabled = !tc.strokes.length;
+  }
+
+  function teachPoint(ev) {
+    var rect = $("teachCanvas").getBoundingClientRect();
+    var fx = (ev.clientX - rect.left) / rect.width, fy = (ev.clientY - rect.top) / rect.height;
+    // undo the on-screen rotation
+    return tc.rot ? [fy * tc.W, (1 - fx) * tc.H] : [fx * tc.W, fy * tc.H];
+  }
+  $("teachCanvas").addEventListener("pointerdown", function (ev) {
+    if (!tc || tc.view !== "photo") return;
+    ev.preventDefault();
+    try { $("teachCanvas").setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    var r = Math.max(2, 9 / (tc.k || 1));   // about 9 screen pixels
+    tc.painting = { cls: tc.cls, r: r, pts: [teachPoint(ev)] };
+    drawTeach();
+  });
+  $("teachCanvas").addEventListener("pointermove", function (ev) {
+    if (!tc || !tc.painting) return;
+    tc.painting.pts.push(teachPoint(ev));
+    drawTeach();
+  });
+  function endTeachStroke() {
+    if (!tc || !tc.painting) return;
+    var st = tc.painting; tc.painting = null;
+    // collect leaf pixels under the brush
+    var W = tc.W, H = tc.H, roi = tc.sec.roi, set = new Set(), r = st.r, r2 = r * r;
+    st.pts.forEach(function (q) {
+      for (var y = Math.max(0, Math.floor(q[1] - r)); y <= Math.min(H - 1, Math.ceil(q[1] + r)); y++) {
+        for (var x = Math.max(0, Math.floor(q[0] - r)); x <= Math.min(W - 1, Math.ceil(q[0] + r)); x++) {
+          var dx = x - q[0], dy = y - q[1];
+          if (dx * dx + dy * dy <= r2) { var i = y * W + x; if (!roi || roi[i]) set.add(i); }
+        }
+      }
+    });
+    if (set.size) { st.idx = Array.from(set); tc.strokes.push(st); buzz(8); }
+    drawTeach();
+    updateTeach();
+  }
+  $("teachCanvas").addEventListener("pointerup", endTeachStroke);
+  $("teachCanvas").addEventListener("pointercancel", function () { if (tc) { tc.painting = null; drawTeach(); } });
+  $("tcUndo").addEventListener("click", function () { if (tc) { tc.strokes.pop(); if (tc.view === "result") previewTeach(); drawTeach(); updateTeach(); } });
+  $("tcClear").addEventListener("click", function () { if (tc) { tc.strokes = []; if (tc.view === "result") previewTeach(); drawTeach(); updateTeach(); } });
+  $("tcClose").addEventListener("click", closeTeach);
+  document.querySelectorAll("#tcView button").forEach(function (b) { b.addEventListener("click", updateTeach); });
+  $("tcSave").addEventListener("click", function () {
+    if (!tc) return;
+    var pal = teachPalette();
+    pal.photos = (pal.photos || 0) + 1;
+    var model = E.buildModel(pal);
+    if (!model) return;
+    settings.palette = pal;
+    taughtModel = model;
+    settings.rules = "taught";
+    Settings.save(settings);
+    closeTeach();
+    // re-score the photo on screen with the taught colours
+    current.sections.forEach(function (sec) { analyzeSection(sec, sec.found); });
+    rebuildCurrent();
+    renderResult();
+    $("rules-taught").checked = true;
+    renderTaughtInfo(); renderQr();
+    toast("Colours taught. Photos are now scored with your colours.");
+  });
+  document.addEventListener("click", function (ev) { if (ev.target.closest("[data-teach]")) openTeach(); });
+
+  // ---------- agreement with visual estimates (Lin's concordance) ----------
+  function linCCC(x, y) {
+    var n = x.length, mx = 0, my = 0;
+    for (var i = 0; i < n; i++) { mx += x[i]; my += y[i]; }
+    mx /= n; my /= n;
+    var sxx = 0, syy = 0, sxy = 0;
+    for (i = 0; i < n; i++) { sxx += (x[i] - mx) * (x[i] - mx); syy += (y[i] - my) * (y[i] - my); sxy += (x[i] - mx) * (y[i] - my); }
+    sxx /= n; syy /= n; sxy /= n;
+    var r = sxy / Math.sqrt(sxx * syy);
+    var ccc = 2 * sxy / (sxx + syy + (mx - my) * (mx - my));
+    return { ccc: ccc, r: r, cb: ccc / r, bias: mx - my, n: n };
+  }
+  function renderAgreement(list) {
+    var pairs = list.filter(function (r) { return r.meta.visual !== undefined && r.meta.visual !== "" && !isNaN(+r.meta.visual); });
+    var card = $("agreeCard");
+    card.hidden = !pairs.length;
+    if (!pairs.length) return;
+    if (pairs.length < 5) {
+      card.innerHTML = '<span class="eyebrow">Agreement with visual estimates</span><span class="small muted">' + pairs.length + " record" + (pairs.length === 1 ? "" : "s") + " with a visual estimate so far. Add at least 5 to see how well the app agrees with your raters.</span>";
+      return;
+    }
+    var a = linCCC(pairs.map(function (r) { return r.result.diseasedPct; }), pairs.map(function (r) { return +r.meta.visual; }));
+    var verdict = a.ccc >= 0.9 ? "strong" : a.ccc >= 0.75 ? "good" : a.ccc >= 0.5 ? "moderate" : "poor";
+    card.innerHTML = '<span class="eyebrow">Agreement with visual estimates</span>' +
+      '<div class="agree-top"><b class="num">ρc = ' + a.ccc.toFixed(2) + '</b><span class="small">' + verdict + " agreement · " + a.n + " leaves</span></div>" +
+      '<span class="small muted">Lin\'s concordance between the app\'s % diseased and your visual estimates (1 = perfect). ' +
+      "Precision r = " + a.r.toFixed(2) + ", accuracy Cb = " + a.cb.toFixed(2) + ". On average the app reads " + Math.abs(a.bias).toFixed(1) +
+      " points " + (a.bias >= 0 ? "higher" : "lower") + " than the raters." + (a.ccc < 0.75 ? " Teaching the colours on a few of these leaves usually improves this." : "") + "</span>";
+  }
+
   // ---------- edit a saved record ----------
   function showEditForm(sheet, rec) {
     var m = rec.meta;
@@ -1293,6 +1572,7 @@
       '<div class="form">' + f("ePlot", "Plot / sample ID", m.plot) +
       '<div class="row2">' + f("eRep", "Rep", m.rep, "number") + f("eLeaf", "Leaf no.", m.leaf, "number") + "</div>" +
       f("eGenotype", "Genotype / entry", m.genotype) +
+      f("eVisual", "Visual estimate, % diseased", m.visual, "number") +
       '<div class="row2">' + f("eTrial", "Trial", m.trial) + f("eRater", "Rater", m.rater) + "</div>" +
       '<div class="field"><label for="eNotes">Notes</label><textarea id="eNotes">' + esc(m.notes || "") + "</textarea></div></div>" +
       '<div class="sheet-actions"><button class="btn btn-primary" type="button" id="eSave">Save changes</button><button class="btn btn-ghost" type="button" id="eCancel">Cancel</button></div>';
@@ -1300,7 +1580,7 @@
     sheet.querySelector("#eSave").addEventListener("click", function () {
       var v = function (id) { return sheet.querySelector("#" + id).value.trim(); };
       if (!v("ePlot")) { sheet.querySelector("#ePlot").focus(); toast("Plot ID is required"); return; }
-      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes") };
+      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes"), visual: v("eVisual") };
       rec.editedAt = new Date().toISOString();
       if (settings.destination !== "local") rec.sync = "pending";
       Records.put(rec).then(function () {
@@ -1746,6 +2026,9 @@
       out.textContent = "✗ Leaf finder failed: " + (e && e.message ? e.message : e) + ". Tap again to retry with one CPU thread (reload the app first).";
     }).then(function () { btn.disabled = false; renderPhoneInfo(); });
   });
+
+  // Read-only hook for automated tests and troubleshooting
+  window.BLSDebug = { current: function () { return current; }, version: APP_VERSION };
 
   // ---------- start ----------
   $("rules-" + (settings.rules === "r1" ? "r1" : "v2")).checked = true;

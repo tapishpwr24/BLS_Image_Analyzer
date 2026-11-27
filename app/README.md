@@ -20,8 +20,12 @@ saved on the phone and copied to storage the user chooses.
   - *Field photos* (soil, other plants, a hand): the on-phone AI leaf finder (SlimSAM) tries several starting points in the middle of the photo and keeps the most leaf-like result.
   - *Photos already cropped to the leaf*: the whole photo is scored.
   - *Adjust leaf edges* lets you correct it: tap a missed part (*+ Leaf*) or background (*− Not leaf*), or draw by hand. The `Segmentation` column records the method (`board`, `auto`, `auto + taps`, `traced`, `whole photo`).
+- **Teach the colours** (idea from pliman and PlantCV): under any result, tap *Teach colours*, choose *Healthy*, *Chlorotic* or *Necrotic*, and brush over examples on the leaf. *Result* previews the scoring live. The examples become a naive Bayes pixel classifier over hue, saturation and brightness histograms, as in PlantCV's multiclass naive Bayes. Examples from several photos add up, pooled palettes worked best in pliman's validation, and the taught colours are shared with the team through the setup link.
+- **Lesions** (as in pliman): number of lesions, average and largest lesion size as % of the leaf (`Lesion_Count`, `Mean_Lesion_Size_Percent`). On heavily streaked leaves, streaks merge into large patches.
+- **Agreement with raters** (Bock et al.): enter an optional visual % diseased per leaf. The Summary then reports **Lin's concordance correlation (ρc)** between the app and the raters, with precision r, accuracy Cb and average bias. This is the standard way to validate severity methods.
 - **Scoring rules** (Settings):
   - *Calibrated v2* (default) is tuned on real phone photos. Hue on the correct brightness scale: green (≥ 68°) is healthy; yellow (48–68°, saturation ≥ 0.30) is chlorotic; tan, brown, straw or very dark (< 48°) is necrotic.
+  - *Taught colours* uses your own examples (see above).
   - *R script v1.0* reproduces `BLS_Image_Analyzer.R` exactly. It never detects chlorosis (the `rgb2hsv` scaling bug, see below) and needs photos cropped to the leaf.
   - Each record stores the rules used (`Rules` column), plus `Leaf_Count`, `Per_Leaf_Diseased_Percent` and `Per_Leaf_BLS_Score`.
 - **Long leaves:** tap *Add section* to photograph the rest of the leaf. Pixel counts from all sections are added up, so the score covers the whole leaf (`Sections` column).
@@ -109,3 +113,11 @@ published R results exactly. Setting `V_DIVISOR: 1` gives the method as document
 current thresholds, though, that version classifies most of the yellow-green leaf surface as
 chlorotic (about 96–98% diseased on all three example leaves), so the thresholds would need
 recalibrating first.
+
+## Background: tools and studies this builds on
+
+- **pliman** (Olivoto, Andrade & Del Ponte 2022, *Tropical Plant Pathology*): severity from user colour palettes, lesion counts and shapes. A pooled palette from several people gave ρc > 0.98 against other software for most diseases.
+- **PlantCV** (Danforth Center): naive Bayes pixel classifier trained on user-sampled pixels per class (e.g. plant, chlorosis, pustule, background).
+- **Leaf Doctor** (Pethybridge & Nelson 2015, *Plant Disease* 99:1310): the user taps healthy colours and adjusts a threshold. Agreement with Assess: R² ≥ 0.79, Cb ≥ 0.96.
+- **Bock and colleagues**: validation of visual and image-based severity estimates with Lin's concordance correlation.
+- **Segment Anything / SlimSAM**: on-phone leaf separation in field photos.

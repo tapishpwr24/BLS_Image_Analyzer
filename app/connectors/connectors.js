@@ -25,7 +25,8 @@
     "Latitude", "Longitude", "GPS_Accuracy_m", "Notes",
     "Image_Width", "Image_Height", "Engine_Version", "Device", "Photo_URL", "Overlay_URL",
     "Sections", "Edited_At", "Segmentation", "Rules", "Leaf_Count",
-    "Per_Leaf_Diseased_Percent", "Per_Leaf_BLS_Score"
+    "Per_Leaf_Diseased_Percent", "Per_Leaf_BLS_Score",
+    "Lesion_Count", "Mean_Lesion_Size_Percent", "Visual_Diseased_Percent"
   ];
 
   function postJson(url, body, headers, plain) {

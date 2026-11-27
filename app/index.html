@@ -173,6 +173,17 @@ h3 { font: 700 16px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; 
 .tracer-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .tracer-top button { background: none; border: 0; color: #a9c4b0; font-size: 15px; font-weight: 600; cursor: pointer; padding: 6px 0; }
 
+.tracer.teach { grid-template-rows: auto 1fr auto auto auto; }
+.teach-counts { padding-block: 6px 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); font-size: 13px; color: #a9c4b0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.teach-counts b { color: #eef4ec; font-family: var(--font-data); font-weight: 500; }
+.teach-counts i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; }
+.seg-dark button[data-c="1"][aria-pressed="true"] { background: #5cc074; color: #0b1a10; }
+.seg-dark button[data-c="2"][aria-pressed="true"] { background: #f0c330; color: #0b1a10; }
+.seg-dark button[data-c="3"][aria-pressed="true"] { background: #e2683c; color: #0b1a10; }
+.agree { display: grid; gap: 6px; }
+.agree-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.agree-top b { font: 800 26px/1 var(--font-display); font-stretch: 85%; }
+
 /* ---------- install ---------- */
 .install { display: grid; grid-template-columns: 46px 1fr; gap: 12px; align-items: start; }
 .install img { width: 46px; height: 46px; border-radius: 12px; }
@@ -516,6 +527,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <div class="scale-ticks" id="scaleTicks"></div>
           <div class="small muted">Diseased area (%) up to which each score applies</div>
         </div>
+        <div class="small" id="lesionLine"></div>
         <div class="small muted" id="methodNote"></div>
       </div>
 
@@ -551,6 +563,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </div>
         <div class="field"><label for="fGenotype">Genotype / entry <span class="muted" style="font-weight:400">(optional)</span></label><input id="fGenotype" type="text" placeholder="e.g. B73"></div>
 
+        <div class="field"><label for="fVisual">Your visual estimate, % diseased <span class="muted" style="font-weight:400">(optional, for checking the app)</span></label><input id="fVisual" type="number" min="0" max="100" step="1" inputmode="decimal" placeholder="e.g. 30"></div>
         <div class="context-line">
           <span id="contextText">Trial and rater not set</span>
           <button class="link-btn" type="button" id="moreBtn" aria-expanded="false" aria-controls="moreFields">Edit</button>
@@ -619,6 +632,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     </div>
 
     <div id="summaryPane" class="view" hidden>
+      <div class="card agree" id="agreeCard" hidden></div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <div class="seg" role="group" aria-label="Group by" id="groupBy">
@@ -661,9 +675,11 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <h3>Scoring rules</h3>
       <div class="dest-list">
         <label class="dest"><input type="radio" name="rules" value="v2" id="rules-v2"><span><b>Calibrated v2 (recommended)</b><span class="small">Tuned on real phone photos: green = healthy, yellow = chlorotic, tan / brown / straw = necrotic.</span></span></label>
+        <label class="dest" id="rulesTaughtRow"><input type="radio" name="rules" value="taught" id="rules-taught"><span><b>Taught colours</b><span class="small" id="taughtInfo">Not taught yet. Under any result, tap Teach colours and brush examples of healthy, chlorotic and necrotic tissue.</span></span></label>
         <label class="dest"><input type="radio" name="rules" value="r1" id="rules-r1"><span><b>R script v1.0</b><span class="small">Reproduces BLS_Image_Analyzer.R exactly (published results). It never detects chlorosis and is only reliable on photos cropped to the leaf.</span></span></label>
       </div>
-      <p class="small muted" style="margin:0">Applies to new photos. Each record stores which rules were used.</p>
+      <p class="small muted" style="margin:0">Applies to new photos. Each record stores which rules were used. Taught colours are shared with your team through the setup link.</p>
+      <button class="btn btn-ghost" type="button" id="resetTaught" hidden>Forget taught colours</button>
     </div>
 
     <div class="card">
@@ -748,6 +764,31 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     <button class="btn btn-ghost" type="button" id="trUndo">Undo</button>
     <button class="btn btn-ghost" type="button" id="trClear">Clear</button>
     <button class="btn btn-use" type="button" id="trUse" disabled>Score this leaf</button>
+  </div>
+</div>
+
+<div class="tracer teach" id="teach" hidden role="dialog" aria-modal="true" aria-labelledby="teachTitle">
+  <div class="tracer-head">
+    <div class="tracer-top"><b id="teachTitle">Teach the colours</b><button type="button" id="tcClose">Cancel</button></div>
+    <span id="teachHint">Choose a class, then brush over clear examples of it on the leaf. Do all three, on a few different leaves if you can.</span>
+  </div>
+  <div class="tracer-stage" id="teachStage"><canvas id="teachCanvas"></canvas></div>
+  <div class="tracer-tools">
+    <div class="seg-dark" role="group" aria-label="Tissue to mark" id="tcClass">
+      <button type="button" data-c="1" aria-pressed="true">Healthy</button>
+      <button type="button" data-c="2" aria-pressed="false">Chlorotic</button>
+      <button type="button" data-c="3" aria-pressed="false">Necrotic</button>
+    </div>
+    <div class="seg-dark" role="group" aria-label="View" id="tcView">
+      <button type="button" data-v="photo" aria-pressed="true">Photo</button>
+      <button type="button" data-v="result" aria-pressed="false">Result</button>
+    </div>
+  </div>
+  <div class="teach-counts" id="tcCounts"></div>
+  <div class="tracer-foot">
+    <button class="btn btn-ghost" type="button" id="tcUndo">Undo</button>
+    <button class="btn btn-ghost" type="button" id="tcClear">Clear</button>
+    <button class="btn btn-use" type="button" id="tcSave" disabled>Use these colours</button>
   </div>
 </div>
 

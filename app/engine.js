@@ -11,7 +11,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var VERSION = "1.1.0";
+  var VERSION = "1.2.0";
 
   // Section 0 of the R script. Do not change unless recalibrating.
   var PARAMS = {
@@ -78,6 +78,8 @@
    * Mirrors R's rgb2hsv(): v = max, s = (max-min)/max, h in [0,1).
    */
   function analyze(rgba, width, height, params, roi, rules) {
+    // rules: "v2" (default), "r1", or a taught colour model from buildModel()
+    var model = rules && rules.logp ? rules : null;
     var v2 = rules !== "r1";
     // roi (optional): Uint8Array, 1 = inside the outline the user traced.
     // Only those pixels can count as leaf (field photos without a black board).
@@ -109,6 +111,12 @@
         if (h < 0) h += 1;
       }
 
+      if (model) {
+        var cls = classifyHSV(model, h, s, v);
+        mask[i] = cls;
+        if (cls === NECROTIC) nNec++; else if (cls === CHLOROTIC) nChl++; else nHealthy++;
+        continue;
+      }
       if (v2) {
         var R2 = RULES_V2;
         if (v < R2.DARK_V || (s >= R2.MIN_SAT && (h < R2.NEC_HUE || h > 330 / 360))) { mask[i] = NECROTIC; nNec++; }
@@ -148,8 +156,112 @@
     out.width = width;
     out.height = height;
     out.mask = mask;
-    out.rules = v2 ? "v2" : "r1";
+    out.rules = model ? "taught" : v2 ? "v2" : "r1";
+    out.lesions = lesionStats(mask, width, height, nLeaf);
     return out;
+  }
+
+  /*
+   * Taught colours (as in PlantCV's naive Bayes classifier and pliman's
+   * palettes): the person brushes example pixels of healthy, chlorotic and
+   * necrotic tissue; per-class histograms of hue, saturation and brightness
+   * become a naive Bayes pixel classifier. Examples from several photos add up.
+   */
+  var PB = [90, 25, 25];   // bins for hue (4 deg each), saturation, brightness
+  var CLASSES = [HEALTHY, CHLOROTIC, NECROTIC];
+
+  function emptyPalette() {
+    var c = {};
+    CLASSES.forEach(function (k) { c[k] = { h: zeros(PB[0]), s: zeros(PB[1]), v: zeros(PB[2]), n: 0 }; });
+    return { version: 1, bins: PB.slice(), classes: c, photos: 0 };
+  }
+  function zeros(n) { var a = []; for (var i = 0; i < n; i++) a.push(0); return a; }
+
+  function hsvOf(rgba, p) {
+    var r = rgba[p] / 255, g = rgba[p + 1] / 255, b = rgba[p + 2] / 255;
+    var max = r > g ? (r > b ? r : b) : (g > b ? g : b), min = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    var d = max - min, h = 0;
+    if (d > 0) { h = max === r ? (g - b) / d : max === g ? 2 + (b - r) / d : 4 + (r - g) / d; h /= 6; if (h < 0) h += 1; }
+    return [h, max > 0 ? d / max : 0, max];
+  }
+  function bin(x, n) { var k = Math.floor(x * n); return k < 0 ? 0 : k >= n ? n - 1 : k; }
+
+  // Add the pixels at the given indices to one class
+  function addSamples(pal, rgba, indices, cls) {
+    var c = pal.classes[cls];
+    for (var j = 0; j < indices.length; j++) {
+      var q = hsvOf(rgba, indices[j] * 4);
+      c.h[bin(q[0], PB[0])]++; c.s[bin(q[1], PB[1])]++; c.v[bin(q[2], PB[2])]++; c.n++;
+    }
+  }
+
+  // Smoothed log-probability tables; classes without examples are left out
+  function buildModel(pal) {
+    var present = CLASSES.filter(function (k) { return pal.classes[k] && pal.classes[k].n >= 30; });
+    if (present.length < 2) return null;
+    var tables = {};
+    present.forEach(function (k) {
+      tables[k] = ["h", "s", "v"].map(function (ch, ci) {
+        var raw = pal.classes[k][ch], n = raw.length, sm = new Float32Array(n), w = [1, 4, 6, 4, 1];
+        for (var i = 0; i < n; i++) {
+          var acc = 0;
+          for (var o = -2; o <= 2; o++) {
+            var j = i + o;
+            if (ci === 0) j = (j + n) % n;            // hue wraps around
+            else if (j < 0 || j >= n) continue;
+            acc += raw[j] * w[o + 2];
+          }
+          sm[i] = acc / 16;
+        }
+        var tot = 0;
+        for (i = 0; i < n; i++) tot += sm[i];
+        var lp = new Float32Array(n);
+        for (i = 0; i < n; i++) lp[i] = Math.log((sm[i] + 0.5) / (tot + 0.5 * n));
+        return lp;
+      });
+    });
+    var counts = {};
+    present.forEach(function (k) { counts[k] = pal.classes[k].n; });
+    return { logp: tables, classes: present, counts: counts };
+  }
+
+  function classifyHSV(model, h, s, v) {
+    var hb = bin(h, PB[0]), sb = bin(s, PB[1]), vb = bin(v, PB[2]);
+    var best = model.classes[0], bestL = -Infinity;
+    for (var k = 0; k < model.classes.length; k++) {
+      var c = model.classes[k], t = model.logp[c];
+      var L = t[0][hb] + t[1][sb] + t[2][vb];
+      if (L > bestL) { bestL = L; best = c; }
+    }
+    return best;
+  }
+
+  /*
+   * Lesions (as in pliman): connected patches of diseased tissue. Patches
+   * smaller than 0.05% of the leaf (min 9 px) are ignored as noise.
+   */
+  function lesionStats(mask, W, H, leafPx) {
+    var n = W * H, seen = new Uint8Array(n), stack = new Int32Array(n);
+    var minPx = Math.max(9, Math.round(leafPx * 0.0005)), count = 0, total = 0, largest = 0;
+    for (var s0 = 0; s0 < n; s0++) {
+      if (seen[s0] || (mask[s0] !== CHLOROTIC && mask[s0] !== NECROTIC)) continue;
+      var sp = 0, size = 0;
+      stack[sp++] = s0; seen[s0] = 1;
+      while (sp) {
+        var i = stack[--sp], x = i % W; size++;
+        var nb = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i >= W ? i - W : -1, i < n - W ? i + W : -1];
+        for (var t = 0; t < 4; t++) {
+          var j = nb[t];
+          if (j >= 0 && !seen[j] && (mask[j] === CHLOROTIC || mask[j] === NECROTIC)) { seen[j] = 1; stack[sp++] = j; }
+        }
+      }
+      if (size >= minPx) { count++; total += size; if (size > largest) largest = size; }
+    }
+    return {
+      count: count,
+      meanSizePct: count ? Math.round(total / count / leafPx * 10000) / 100 : 0,
+      largestPct: Math.round(largest / leafPx * 10000) / 100
+    };
   }
 
   // Per-leaf results when one photo holds several leaves (labels: 0 = background, 1..n)
@@ -348,6 +460,9 @@
     boardMask: boardMask,
     perRegion: perRegion,
     RULES_V2: RULES_V2,
+    emptyPalette: emptyPalette,
+    addSamples: addSamples,
+    buildModel: buildModel,
     PARAMS: PARAMS,
     SCALE: SCALE,
     blsScore: blsScore,
