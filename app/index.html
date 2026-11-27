@@ -14,9 +14,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="BLS Scorer">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,600..800&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
 <style>
 /* Layout: single column (max 560px) for one-handed field use; dark "black board" capture panel,
    light result cards, floating tab bar at the thumb. */
@@ -153,7 +151,7 @@ h3 { font: 700 16px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; 
 .bg-mode button[aria-pressed="true"] { background: var(--board-ink); color: #10251a; }
 
 /* ---------- tracer (outline the leaf) ---------- */
-.tracer { position: fixed; inset: 0; z-index: 50; background: #050806; color: #eef4ec; display: grid; grid-template-rows: auto 1fr auto;
+.tracer { position: fixed; inset: 0; z-index: 50; background: #050806; color: #eef4ec; display: grid; grid-template-rows: auto 1fr auto auto;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .tracer-head { padding-block: 12px 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 2px; }
 .tracer-head b { font: 800 19px/1.2 var(--font-display); font-stretch: 88%; }
@@ -164,6 +162,14 @@ h3 { font: 700 16px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; 
 .tracer-foot .btn { min-height: 50px; }
 .tracer-foot .btn-ghost { color: #eef4ec; border-color: rgba(255,255,255,0.22); }
 .tracer-foot .btn-use { background: #8fd19e; color: #0b1a10; }
+.tracer-tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding-block: 4px 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.seg-dark { display: inline-grid; grid-auto-flow: column; background: rgba(255,255,255,0.08); border-radius: 12px; padding: 3px; }
+.seg-dark button { border: 0; background: transparent; color: #a9c4b0; padding: 8px 12px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg-dark button[aria-pressed="true"] { background: #eef4ec; color: #0b1a10; }
+.seg-dark button[data-s="0"][aria-pressed="true"] { background: #ffb39c; }
+.tracer-busy { position: absolute; inset: auto 0 14px; display: flex; justify-content: center; pointer-events: none; }
+.tracer-busy span { display: inline-flex; align-items: center; gap: 10px; background: rgba(5,8,6,0.85); padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+.tracer-busy .spinner { width: 20px; height: 20px; border-width: 3px; border-color: rgba(255,255,255,0.2); border-top-color: #8fd19e; }
 .tracer-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .tracer-top button { background: none; border: 0; color: #a9c4b0; font-size: 15px; font-weight: 600; cursor: pointer; padding: 6px 0; }
 
@@ -345,7 +351,7 @@ textarea { min-height: 70px; resize: vertical; }
 .dest .soon-tag { font: 500 10px var(--font-data); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 6px; color: var(--ink-2); }
 .qr-box { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
 #qr { background: #fff; padding: 8px; border-radius: 10px; width: 132px; height: 132px; display: grid; place-items: center; color: #333; text-align: center; }
-#qr img, #qr canvas { width: 116px !important; height: 116px !important; }
+#qr svg { width: 116px; height: 116px; display: block; }
 .status-line { font-size: 13px; }
 .status-line.ok { color: var(--healthy); }
 .status-line.err { color: var(--necrotic); }
@@ -461,7 +467,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <ul class="tips" id="tipsField" hidden>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Leaf large and in focus</li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 18a5 5 0 1 1 1.5-9.8A6 6 0 0 1 20 11a4 4 0 0 1-1 7z"/></svg>Shade, no glare</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>Then trace around the leaf</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>Leaf in the centre; the app finds its edges</li>
       </ul>
       <button class="sample-link" id="sampleBtn" type="button">Try it with the example leaf</button>
     </div>
@@ -502,8 +508,8 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </div>
         <div class="qc-warn" id="qcWarn" hidden></div>
         <div class="noboard" id="noBoardWarn" hidden>
-          <span><b>No black background found.</b> If soil or other plants are in the photo, they are being counted as leaf. Outline the leaf to score only the leaf.</span>
-          <button class="btn" type="button" data-outline>Outline the leaf</button>
+          <span><b>No black background found.</b> If soil or other plants are in the photo, they are being counted as leaf. Let the app find the leaf to score only the leaf.</span>
+          <button class="btn" type="button" data-outline>Find the leaf</button>
         </div>
         <div class="comp">
           <div class="comp-bar" id="compBar"></div>
@@ -714,10 +720,22 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 
 <div class="tracer" id="tracer" hidden role="dialog" aria-modal="true" aria-labelledby="tracerTitle">
   <div class="tracer-head">
-    <div class="tracer-top"><b id="tracerTitle">Outline the leaf</b><button type="button" id="trCancel">Cancel</button></div>
-    <span id="tracerHint">Trace around the leaf with your finger. Only what is inside the outline is scored. Draw again to add more of the leaf.</span>
+    <div class="tracer-top"><b id="tracerTitle">Find the leaf</b><button type="button" id="trCancel">Cancel</button></div>
+    <span id="tracerHint">Finding the leaf…</span>
   </div>
-  <div class="tracer-stage" id="traceStage"><canvas id="traceCanvas"></canvas></div>
+  <div class="tracer-stage" id="traceStage"><canvas id="traceCanvas"></canvas>
+    <div class="tracer-busy" id="trBusy" hidden><span><span class="spinner"></span><span id="trBusyText">Finding the leaf…</span></span></div>
+  </div>
+  <div class="tracer-tools">
+    <div class="seg-dark" role="group" aria-label="How to mark the leaf" id="trMode">
+      <button type="button" data-m="auto" aria-pressed="true">Auto-find</button>
+      <button type="button" data-m="draw" aria-pressed="false">Draw by hand</button>
+    </div>
+    <div class="seg-dark" role="group" aria-label="What a tap marks" id="trSign">
+      <button type="button" data-s="1" aria-pressed="true">+ Leaf</button>
+      <button type="button" data-s="0" aria-pressed="false">− Not leaf</button>
+    </div>
+  </div>
   <div class="tracer-foot">
     <button class="btn btn-ghost" type="button" id="trUndo">Undo</button>
     <button class="btn btn-ghost" type="button" id="trClear">Clear</button>
@@ -728,7 +746,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 <div class="toast" id="toast" role="status" hidden></div>
 <div id="sheetRoot"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script src="vendor/jszip.min.js"></script>
 <script src="engine.js"></script>
 <script src="store.js"></script>

@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.5.0";
+  var APP_VERSION = "0.6.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -118,12 +118,15 @@
   }
 
   // Score one photo, either the black-board way or inside a traced outline
-  function analyzeSection(sec, roi) {
+  // found: null (black board) or {roi, method, points} from the leaf finder
+  function analyzeSection(sec, found) {
+    var roi = found ? found.roi : null;
     var d = sec.imageData;
     var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined);
     sec.result = res;
     sec.roi = roi || null;
-    sec.segmentation = roi ? "traced" : "black board";
+    sec.segmentation = found ? found.method : "black board";
+    sec.samPoints = found && found.points ? found.points : null;
     sec.boardFraction = roi ? null : E.borderDarkFraction(d.data, d.width, d.height);
     if (res.ok) {
       var px = E.overlay(d.data, res.mask, 0.45);
@@ -162,12 +165,12 @@
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
         $("busy").hidden = true;
         var useTrace = settings.bgMode === "field" && !isSample;
-        return (useTrace ? openTracer(data) : Promise.resolve(null)).then(function (roi) {
-          if (useTrace && !roi) {           // outline cancelled
+        return (useTrace ? openTracer(data) : Promise.resolve(null)).then(function (found) {
+          if (useTrace && !found) {         // cancelled
             if (!appending) { analyzeState("capture"); current = null; }
             return;
           }
-          var sec = analyzeSection({ name: name, imageData: data }, roi);
+          var sec = analyzeSection({ name: name, imageData: data }, found);
           if (!sec.result.ok) {
             if (appending) { toast(sec.result.message); return; }
             $("errorText").textContent = sec.result.message;
@@ -207,7 +210,7 @@
     var last = secs[secs.length - 1];
     html += '<button class="add-sec solid" type="button" data-outline>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
-      (last.segmentation === "traced" ? "Redraw outline" : "Outline leaf") + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
+      (last.segmentation === "black board" ? "Find leaf edges" : "Adjust leaf edges") + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
@@ -215,15 +218,15 @@
   function outlineLastSection() {
     if (!current) return;
     var sec = current.sections[current.sections.length - 1];
-    openTracer(sec.imageData, sec.roi).then(function (roi) {
-      if (!roi) return;
-      var before = { result: sec.result, roi: sec.roi, segmentation: sec.segmentation, boardFraction: sec.boardFraction, overlayData: sec.overlayData };
-      analyzeSection(sec, roi);
+    openTracer(sec.imageData, { points: sec.samPoints, method: sec.segmentation }).then(function (found) {
+      if (!found) return;
+      var before = { result: sec.result, roi: sec.roi, segmentation: sec.segmentation, boardFraction: sec.boardFraction, overlayData: sec.overlayData, samPoints: sec.samPoints };
+      analyzeSection(sec, found);
       if (!sec.result.ok) { toast(sec.result.message); Object.assign(sec, before); return; }
       rebuildCurrent();
       renderResult();
       buzz(25);
-      toast("Scored inside your outline");
+      toast("Scored the leaf only");
     });
   }
   document.addEventListener("click", function (ev) {
@@ -632,7 +635,7 @@
     ];
     if (m.notes) kv.push(["Notes", m.notes]);
     if (r.sections > 1) kv.push(["Photographed in", r.sections + " sections"]);
-    kv.push(["Leaf separated by", r.segmentation === "traced" ? "Outline traced by hand" : r.segmentation === "mixed" ? "Board and outline" : "Black board"]);
+    kv.push(["Leaf separated by", segLabel(r.segmentation)]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
     var wrap = document.createElement("div");
@@ -806,12 +809,12 @@
   function renderQr() {
     var box = $("qr");
     box.innerHTML = "";
-    if (window.QRCode) {
-      try { new QRCode(box, { text: setupLink(), width: 116, height: 116, correctLevel: QRCode.CorrectLevel.L }); }
-      catch (e) { box.innerHTML = '<span class="small">QR unavailable</span>'; }
-    } else {
-      box.innerHTML = '<span class="small">QR code appears when you\'re online</span>';
-    }
+    try {
+      var qr = window.qrcode(0, "L");
+      qr.addData(setupLink());
+      qr.make();
+      box.innerHTML = qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true });
+    } catch (e) { box.innerHTML = '<span class="small">QR unavailable</span>'; }
   }
 
   $("copySetup").addEventListener("click", function () {
@@ -850,16 +853,28 @@
     try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
   }
 
-  // ---------- outline the leaf (field photos) ----------
-  var tr = null;   // tracer state while open
+  // ---------- find the leaf (field photos) ----------
+  // Auto-find: SlimSAM model (segment.js) proposes the leaf from the centre of
+  // the photo; taps add leaf (+) or background (−) points. Draw-by-hand is the
+  // fallback for old phones or when the model can't be loaded.
+  var tr = null;
+  var segModule = null;
+  var samCache = new WeakMap();   // imageData -> image embedding, so re-opening is instant
 
-  function openTracer(imageData, previousRoi) {
+  function segLabel(v) {
+    return { "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
+      "traced": "Outline traced by hand", "mixed": "Mixed methods", "black board": "Black board" }[v] || v || "Black board";
+  }
+  function getSeg() { return segModule ? Promise.resolve(segModule) : import("./segment.js").then(function (m) { return (segModule = m); }); }
+
+  function openTracer(imageData, prev) {
     return new Promise(function (resolve) {
       var W = imageData.width, H = imageData.height;
       var base = document.createElement("canvas");
       base.width = W; base.height = H;
       base.getContext("2d").putImageData(imageData, 0, 0);
-      tr = { W: W, H: H, base: base, polys: [], cur: null, resolve: resolve };
+      tr = { W: W, H: H, base: base, imageData: imageData, polys: [], cur: null, resolve: resolve,
+        mode: "auto", sign: 1, points: [], roi: null, layer: null, handle: null, busy: false };
       $("tracer").hidden = false;
       document.body.style.overflow = "hidden";
       requestAnimationFrame(function () {
@@ -873,51 +888,163 @@
         tr.k = k;
         drawTrace();
       });
-      updateTraceButtons();
+      setTraceMode(prev && prev.method === "traced" ? "draw" : "auto", prev);
     });
   }
 
-  function closeTracer(roi) {
+  function closeTracer(found) {
     $("tracer").hidden = true;
     document.body.style.overflow = "";
     var done = tr && tr.resolve;
     tr = null;
-    if (done) done(roi || null);
+    if (done) done(found || null);
+  }
+
+  function traceBusy(text) {
+    $("trBusy").hidden = !text;
+    if (text) $("trBusyText").textContent = text;
+  }
+  function traceHint(text) { $("tracerHint").textContent = text; }
+
+  function setTraceMode(mode, prev) {
+    if (!tr) return;
+    tr.mode = mode;
+    document.querySelectorAll("#trMode button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.m === mode)); });
+    $("trSign").hidden = mode !== "auto";
+    if (mode === "auto") startAuto(prev);
+    else {
+      traceBusy(null);
+      traceHint(tr.autoError ? tr.autoError + " Trace around the leaf with your finger." : "Trace around the leaf with your finger. Only what is inside the outline is scored.");
+    }
+    drawTrace();
+    updateTraceButtons();
+  }
+
+  function startAuto(prev) {
+    var mine = tr;
+    if (tr.handle) { if (!tr.roi) runMask(); return; }
+    tr.busy = true;
+    traceHint("Finding the leaf edges…");
+    traceBusy("Starting the leaf finder…");
+    getSeg().then(function (m) {
+      if (!m.isLoaded()) traceBusy("Downloading the leaf finder (first time only)…");
+      return m.load(function (f) { if (tr === mine) traceBusy("Downloading the leaf finder (first time only)… " + Math.round(f * 100) + "%"); }).then(function () { return m; });
+    }).then(function (m) {
+      if (tr !== mine) return null;
+      var cached = samCache.get(mine.imageData);
+      if (cached) return cached;
+      traceBusy("Finding the leaf…");
+      return m.embed(mine.imageData).then(function (h) { samCache.set(mine.imageData, h); return h; });
+    }).then(function (h) {
+      if (tr !== mine || !h) return;
+      tr.handle = h;
+      tr.points = prev && prev.points && prev.points.length ? prev.points.slice() : [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }];
+      return runMask();
+    }).catch(function (e) {
+      if (tr !== mine) return;
+      tr.busy = false;
+      tr.autoError = "Automatic leaf finding isn't available here" + (e && e.message ? " (" + e.message + ")" : "") + ".";
+      setTraceMode("draw");
+    });
+  }
+
+  function runMask() {
+    var mine = tr;
+    tr.busy = true;
+    traceBusy("Finding the leaf…");
+    updateTraceButtons();
+    return segModule.mask(tr.handle, tr.points).then(function (r) {
+      if (tr !== mine) return;
+      tr.roi = r.roi;
+      var area = 0;
+      for (var i = 0; i < r.roi.length; i++) area += r.roi[i];
+      tr.area = area / r.roi.length;
+      buildMaskLayer();
+      tr.busy = false;
+      traceBusy(null);
+      traceHint(tr.area < 0.01
+        ? "No leaf found at the centre. Tap on the leaf."
+        : "Leaf found. Missed a part? Tap it. Background included? Choose − Not leaf and tap it.");
+      drawTrace();
+      updateTraceButtons();
+    }).catch(function (e) {
+      if (tr !== mine) return;
+      tr.busy = false;
+      traceBusy(null);
+      traceHint("Something went wrong finding the leaf (" + e.message + "). Try again or draw by hand.");
+      updateTraceButtons();
+    });
+  }
+
+  // Dim everything that is not leaf and draw a green edge around the leaf
+  function buildMaskLayer() {
+    var W = tr.W, H = tr.H, roi = tr.roi;
+    var c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    var ctx = c.getContext("2d");
+    var img = ctx.createImageData(W, H), d = img.data;
+    var e = Math.max(1, Math.round(Math.max(W, H) / 400));   // edge thickness in image pixels
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var i = y * W + x, p = i * 4;
+        if (!roi[i]) { d[p + 3] = 160; continue; }
+        var edge = (x < e || !roi[i - e]) || (x >= W - e || !roi[i + e]) || (y < e || !roi[i - e * W]) || (y >= H - e || !roi[i + e * W]);
+        if (edge) { d[p] = 143; d[p + 1] = 209; d[p + 2] = 158; d[p + 3] = 255; }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    tr.layer = c;
   }
 
   function drawTrace() {
     if (!tr) return;
     var cv = $("traceCanvas"), ctx = cv.getContext("2d");
     var sx = cv.width / tr.W, sy = cv.height / tr.H;
+    var dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.drawImage(tr.base, 0, 0, cv.width, cv.height);
+    if (tr.mode === "auto") {
+      if (tr.layer) ctx.drawImage(tr.layer, 0, 0, cv.width, cv.height);
+      tr.points.forEach(function (pt) {
+        if (pt.auto && tr.points.length > 1) return;
+        ctx.beginPath();
+        ctx.arc(pt.x * sx, pt.y * sy, 9 * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = pt.label ? "#8fd19e" : "#ff8a6b";
+        ctx.fill();
+        ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#0b1a10"; ctx.stroke();
+        ctx.fillStyle = "#0b1a10";
+        ctx.font = "bold " + Math.round(14 * dpr) + "px system-ui";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(pt.label ? "+" : "−", pt.x * sx, pt.y * sy + dpr);
+      });
+      return;
+    }
     var path = function (pts) {
       ctx.beginPath();
       pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0] * sx, q[1] * sy); else ctx.moveTo(q[0] * sx, q[1] * sy); });
     };
     if (tr.polys.length) {
-      // dim what is outside the outline
       ctx.save();
       ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
       tr.polys.forEach(function (pts) { pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0] * sx, q[1] * sy); else ctx.moveTo(q[0] * sx, q[1] * sy); }); ctx.closePath(); });
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
       ctx.fill("evenodd");
       ctx.restore();
     }
-    ctx.lineWidth = Math.max(2, 3 * (window.devicePixelRatio || 1));
+    ctx.lineWidth = Math.max(2, 3 * dpr);
     ctx.lineJoin = "round"; ctx.lineCap = "round";
     tr.polys.forEach(function (pts) { path(pts); ctx.closePath(); ctx.strokeStyle = "#8fd19e"; ctx.stroke(); });
     if (tr.cur && tr.cur.length > 1) { path(tr.cur); ctx.strokeStyle = "#f0c330"; ctx.stroke(); }
   }
 
   function updateTraceButtons() {
-    var n = tr ? tr.polys.length : 0;
-    $("trUse").disabled = !n;
-    $("trUndo").disabled = !n;
-    $("trClear").disabled = !n;
-    $("tracerHint").textContent = n
-      ? "Check that only the leaf is bright. Draw again to add a missed part, or Undo."
-      : "Trace around the leaf with your finger. Only what is inside the outline is scored.";
+    if (!tr) return;
+    var auto = tr.mode === "auto";
+    var userPts = tr.points.filter(function (p) { return !p.auto; }).length;
+    $("trUse").disabled = tr.busy || (auto ? !(tr.roi && tr.area >= 0.002) : !tr.polys.length);
+    $("trUndo").disabled = tr.busy || (auto ? !userPts : !tr.polys.length);
+    $("trClear").disabled = tr.busy || (auto ? !userPts : !tr.polys.length);
+    $("trClear").textContent = auto ? "Reset" : "Clear";
   }
 
   function tracePoint(ev) {
@@ -931,17 +1058,30 @@
     if (!tr) return;
     ev.preventDefault();
     try { $("traceCanvas").setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
-    tr.cur = [tracePoint(ev)];
+    tr.down = [ev.clientX, ev.clientY];
+    if (tr.mode === "draw") tr.cur = [tracePoint(ev)];
   });
   $("traceCanvas").addEventListener("pointermove", function (ev) {
-    if (!tr || !tr.cur) return;
+    if (!tr || tr.mode !== "draw" || !tr.cur) return;
     var q = tracePoint(ev), last = tr.cur[tr.cur.length - 1];
-    var minStep = 2 / (tr.k || 1);
-    if (Math.abs(q[0] - last[0]) + Math.abs(q[1] - last[1]) >= minStep) { tr.cur.push(q); drawTrace(); }
+    if (Math.abs(q[0] - last[0]) + Math.abs(q[1] - last[1]) >= 2 / (tr.k || 1)) { tr.cur.push(q); drawTrace(); }
   });
-  function endStroke() {
-    if (!tr || !tr.cur) return;
-    // ignore taps and tiny scribbles
+  function endStroke(ev) {
+    if (!tr) return;
+    if (tr.mode === "auto") {
+      // a tap (not a drag) adds a + or − point and re-runs the decoder
+      if (!tr.down || tr.busy || !tr.handle) return;
+      var moved = Math.abs(ev.clientX - tr.down[0]) + Math.abs(ev.clientY - tr.down[1]);
+      tr.down = null;
+      if (moved > 14) return;
+      var q = tracePoint(ev);
+      tr.points.push({ x: q[0], y: q[1], label: tr.sign });
+      buzz(10);
+      drawTrace();
+      runMask();
+      return;
+    }
+    if (!tr.cur) return;
     var xs = tr.cur.map(function (q) { return q[0]; }), ys = tr.cur.map(function (q) { return q[1]; });
     var span = (Math.max.apply(null, xs) - Math.min.apply(null, xs)) + (Math.max.apply(null, ys) - Math.min.apply(null, ys));
     if (tr.cur.length >= 6 && span * (tr.k || 1) > 30) { tr.polys.push(tr.cur); buzz(10); }
@@ -950,13 +1090,42 @@
     updateTraceButtons();
   }
   $("traceCanvas").addEventListener("pointerup", endStroke);
-  $("traceCanvas").addEventListener("pointercancel", endStroke);
-  $("trUndo").addEventListener("click", function () { if (tr) { tr.polys.pop(); drawTrace(); updateTraceButtons(); } });
-  $("trClear").addEventListener("click", function () { if (tr) { tr.polys = []; drawTrace(); updateTraceButtons(); } });
+  $("traceCanvas").addEventListener("pointercancel", function () { if (tr) { tr.cur = null; tr.down = null; drawTrace(); } });
+
+  document.querySelectorAll("#trMode button").forEach(function (b) {
+    b.addEventListener("click", function () { if (tr && tr.mode !== b.dataset.m) setTraceMode(b.dataset.m); });
+  });
+  document.querySelectorAll("#trSign button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      if (!tr) return;
+      tr.sign = +b.dataset.s;
+      document.querySelectorAll("#trSign button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    });
+  });
+  $("trUndo").addEventListener("click", function () {
+    if (!tr) return;
+    if (tr.mode === "auto") {
+      for (var i = tr.points.length - 1; i >= 0; i--) if (!tr.points[i].auto) { tr.points.splice(i, 1); break; }
+      if (!tr.points.length) tr.points = [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }];
+      runMask();
+    } else { tr.polys.pop(); drawTrace(); updateTraceButtons(); }
+  });
+  $("trClear").addEventListener("click", function () {
+    if (!tr) return;
+    if (tr.mode === "auto") { tr.points = [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }]; runMask(); }
+    else { tr.polys = []; drawTrace(); updateTraceButtons(); }
+  });
   $("trCancel").addEventListener("click", function () { closeTracer(null); });
   $("trUse").addEventListener("click", function () {
-    if (!tr || !tr.polys.length) return;
-    // Rasterise the outline(s) at analysis resolution: 1 = inside
+    if (!tr) return;
+    if (tr.mode === "auto") {
+      if (!tr.roi) return;
+      var tapped = tr.points.some(function (p) { return !p.auto; });
+      var pts = tr.points.map(function (p) { return { x: p.x, y: p.y, label: p.label, auto: p.auto }; });
+      return closeTracer({ roi: tr.roi, method: tapped ? "auto + taps" : "auto", points: pts });
+    }
+    if (!tr.polys.length) return;
+    // Rasterise the hand-drawn outline(s) at analysis resolution: 1 = inside
     var c = document.createElement("canvas");
     c.width = tr.W; c.height = tr.H;
     var ctx = c.getContext("2d");
@@ -970,7 +1139,7 @@
     var a = ctx.getImageData(0, 0, tr.W, tr.H).data;
     var roi = new Uint8Array(tr.W * tr.H);
     for (var i = 0, p = 3; i < roi.length; i++, p += 4) roi[i] = a[p] > 127 ? 1 : 0;
-    closeTracer(roi);
+    closeTracer({ roi: roi, method: "traced", points: null });
   });
   document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
 
@@ -1435,6 +1604,16 @@
   Records.all().then(function (all) { if (!all.length && !current) loadSample(true); });
 
   if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
-    try { navigator.serviceWorker.register("sw.js").catch(function () {}); } catch (e) { /* not available here */ }
+    try {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+      // The service worker adds the headers that let the leaf finder use several
+      // CPU cores. They apply from the next page load, so reload once when it
+      // first takes control (before the person has done anything).
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        var did = false;
+        try { did = sessionStorage.getItem("bls-coi-reload") === "1"; sessionStorage.setItem("bls-coi-reload", "1"); } catch (e) { did = true; }
+        if (!self.crossOriginIsolated && !did && (!current || current.sample) && $("tracer").hidden) location.reload();
+      });
+    } catch (e) { /* not available here */ }
   }
 })();

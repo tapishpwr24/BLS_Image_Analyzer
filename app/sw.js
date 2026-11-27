@@ -1,38 +1,75 @@
-/* Offline support: the app shell is cached so scoring works with no signal. */
-var CACHE = "bls-leaf-scorer-v0.5.0";
+/*
+ * Offline support + cross-origin isolation.
+ *
+ * - The app shell is cached so scoring works with no signal.
+ * - The leaf-finder model and runtime (~25 MB) are cached once and served from
+ *   the cache afterwards (cache-first), so they never re-download.
+ * - Every page response gets COOP/COEP headers. GitHub Pages can't set them,
+ *   and they let the leaf finder use several CPU cores (about 3x faster).
+ */
+var VERSION = "v0.6.0";
+var SHELL_CACHE = "bls-shell-" + VERSION;
+var MODEL_CACHE = "bls-models-v1";          // only bump when the model files change
 var SHELL = [
-  "./", "index.html", "engine.js", "store.js", "app.js", "connectors/connectors.js", "vendor/jszip.min.js",
-  "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/icon-maskable-512.png",
-  "samples/BLS_02.jpg"
+  "./", "index.html", "engine.js", "store.js", "app.js", "segment.js", "connectors/connectors.js",
+  "vendor/jszip.min.js", "vendor/qrcode.js", "vendor/fonts/fonts.css",
+  "vendor/fonts/archivo-latin-wdth-normal.woff2", "vendor/fonts/ibm-plex-sans-latin-400-normal.woff2",
+  "vendor/fonts/ibm-plex-sans-latin-500-normal.woff2", "vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
+  "vendor/fonts/ibm-plex-mono-latin-500-normal.woff2",
+  "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png",
+  "icons/apple-touch-icon.png", "icons/icon-maskable-512.png", "samples/BLS_02.jpg"
 ];
+var HEAVY = /\/(models\/|vendor\/ort\/)/;   // big, versioned files: cache-first
 
 self.addEventListener("install", function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(caches.open(SHELL_CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
 });
 
 self.addEventListener("activate", function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.filter(function (k) { return k !== SHELL_CACHE && k !== MODEL_CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 
+function isolate(res) {
+  if (!res || res.type === "opaque" || res.status === 0) return res;
+  var h = new Headers(res.headers);
+  h.set("Cross-Origin-Opener-Policy", "same-origin");
+  h.set("Cross-Origin-Embedder-Policy", "require-corp");
+  h.set("Cross-Origin-Resource-Policy", "same-origin");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
 self.addEventListener("fetch", function (e) {
   var req = e.request;
-  if (req.method !== "GET") return; // uploads always go to the network
+  if (req.method !== "GET") return;                      // uploads always go to the network
   var url = new URL(req.url);
-  var cacheable = url.origin === location.origin ||
-    url.host === "fonts.googleapis.com" || url.host === "fonts.gstatic.com" || url.host === "cdnjs.cloudflare.com";
-  if (!cacheable) return;
-  // Network first for our own files (get updates), cache as fallback offline
+  if (url.origin !== location.origin) return;            // other sites: browser handles it
+
+  if (HEAVY.test(url.pathname)) {
+    e.respondWith(caches.open(MODEL_CACHE).then(function (c) {
+      return c.match(req).then(function (hit) {
+        if (hit) return isolate(hit);
+        return fetch(req).then(function (res) {
+          if (res.ok) c.put(req, res.clone());
+          return isolate(res);
+        });
+      });
+    }));
+    return;
+  }
+
+  // App files: network first (to get updates), cache when offline
   e.respondWith(fetch(req).then(function (res) {
-    if (res.ok || res.type === "opaque") {
+    if (res.ok) {
       var copy = res.clone();
-      caches.open(CACHE).then(function (c) { c.put(req, copy); });
+      caches.open(SHELL_CACHE).then(function (c) { c.put(req, copy); });
     }
-    return res;
+    return isolate(res);
   }).catch(function () {
     return caches.match(req, { ignoreSearch: true }).then(function (hit) {
-      return hit || (req.mode === "navigate" ? caches.match("index.html") : undefined);
+      if (hit) return isolate(hit);
+      return req.mode === "navigate" ? caches.match("index.html").then(isolate) : undefined;
     });
   }));
 });
