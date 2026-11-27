@@ -180,6 +180,9 @@ h3 { font: 700 16px/1.3 var(--font-display); margin: 0; letter-spacing: 0.01em; 
 .seg-dark button[data-c="1"][aria-pressed="true"] { background: #5cc074; color: #0b1a10; }
 .seg-dark button[data-c="2"][aria-pressed="true"] { background: #f0c330; color: #0b1a10; }
 .seg-dark button[data-c="3"][aria-pressed="true"] { background: #e2683c; color: #0b1a10; }
+.ruler { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
+.ruler button { min-height: 44px; border: 0; border-radius: 8px; color: #fff; font: 700 17px var(--font-display); cursor: pointer; opacity: 0.45; transition: opacity 0.15s, transform 0.15s; }
+.ruler button[aria-checked="true"] { opacity: 1; transform: scaleY(1.12); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
 .agree { display: grid; gap: 6px; }
 .agree-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .agree-top b { font: 800 26px/1 var(--font-display); font-stretch: 85%; }
@@ -563,7 +566,11 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </div>
         <div class="field"><label for="fGenotype">Genotype / entry <span class="muted" style="font-weight:400">(optional)</span></label><input id="fGenotype" type="text" placeholder="e.g. B73"></div>
 
-        <div class="field"><label for="fVisual">Your visual estimate, % diseased <span class="muted" style="font-weight:400">(optional, for checking the app)</span></label><input id="fVisual" type="number" min="0" max="100" step="1" inputmode="decimal" placeholder="e.g. 30"></div>
+        <div class="field"><span class="label" id="visLbl">Your visual BLS score, 1–9 <span class="muted" style="font-weight:400">(optional, to check the app)</span></span>
+          <div class="ruler" role="radiogroup" aria-labelledby="visLbl" id="visRuler"></div>
+          <div class="scale-ticks"><span>≤0.5</span><span>2</span><span>6</span><span>12</span><span>25</span><span>40</span><span>60</span><span>75</span><span>&gt;75</span></div>
+          <span class="hint" id="visHint">Tap the score you would give this leaf by eye. Tap again to clear.</span>
+        </div>
         <div class="context-line">
           <span id="contextText">Trial and rater not set</span>
           <button class="link-btn" type="button" id="moreBtn" aria-expanded="false" aria-controls="moreFields">Edit</button>

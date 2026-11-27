@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.9.0";
+  var APP_VERSION = "0.9.1";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -490,7 +490,7 @@
     var meta = {
       trial: $("fTrial").value.trim(), plot: $("fPlot").value.trim(), genotype: $("fGenotype").value.trim(),
       rep: $("fRep").value.trim(), leaf: $("fLeaf").value.trim(), rater: $("fRater").value.trim(), notes: $("fNotes").value.trim(),
-      visual: $("fVisual").value.trim()
+      visualScore: visualScore || ""
     };
     // Remember trial and rater for the next leaf
     settings.trial = meta.trial; settings.rater = meta.rater;
@@ -524,7 +524,7 @@
         $("savedText").textContent = [meta.rep && "Rep " + meta.rep, meta.leaf && "Leaf " + meta.leaf, "Score " + r.score, fmtPct(r.diseasedPct) + " diseased"].filter(Boolean).join(" · ") + ". " + where;
         // Ready for the next leaf from the same plot: keep plot, trial, rater; bump leaf no.
         $("fNotes").value = "";
-        $("fVisual").value = "";
+        setVisual(null);
         $("fLeaf").value = String((parseInt($("fLeaf").value, 10) || 0) + 1);
         $("nextLeafLabel").textContent = "Next leaf (" + $("fLeaf").value + ")";
         var np = nextPlotAfter(meta.plot);
@@ -560,7 +560,7 @@
       Per_Leaf_Diseased_Percent: r.perLeaf ? r.perLeaf.map(function (q) { return q.diseasedPct; }).join("; ") : "",
       Per_Leaf_BLS_Score: r.perLeaf ? r.perLeaf.map(function (q) { return q.score; }).join("; ") : "",
       Lesion_Count: r.lesions ? r.lesions.count : "", Mean_Lesion_Size_Percent: r.lesions ? r.lesions.meanSizePct : "",
-      Visual_Diseased_Percent: m.visual || ""
+      Visual_BLS_Score: m.visualScore || ""
     };
   }
 
@@ -729,7 +729,7 @@
     kv.push(["Leaf separated by", segLabel(r.segmentation)]);
     kv.push(["Scoring rules", r.rules === "r1" ? "R script v1.0" : r.rules === "taught" ? "Taught colours" : "Calibrated v2"]);
     if (r.lesions) kv.push(["Lesions", r.lesions.count + " · average " + r.lesions.meanSizePct + "% of leaf"]);
-    if (m.visual) kv.push(["Visual estimate", m.visual + "%"]);
+    if (m.visualScore) kv.push(["Visual BLS score", String(m.visualScore)]);
     if (r.perLeaf) kv.push(["Per leaf", r.perLeaf.map(function (q, i) { return "Leaf " + (i + 1) + ": " + fmtPct(q.diseasedPct) + " (BLS " + q.score + ")"; }).join(" · ")]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
@@ -1544,22 +1544,49 @@
     return { ccc: ccc, r: r, cb: ccc / r, bias: mx - my, n: n };
   }
   function renderAgreement(list) {
-    var pairs = list.filter(function (r) { return r.meta.visual !== undefined && r.meta.visual !== "" && !isNaN(+r.meta.visual); });
+    var pairs = list.filter(function (r) { return r.meta.visualScore >= 1 && r.meta.visualScore <= 9; });
     var card = $("agreeCard");
     card.hidden = !pairs.length;
     if (!pairs.length) return;
     if (pairs.length < 5) {
-      card.innerHTML = '<span class="eyebrow">Agreement with visual estimates</span><span class="small muted">' + pairs.length + " record" + (pairs.length === 1 ? "" : "s") + " with a visual estimate so far. Add at least 5 to see how well the app agrees with your raters.</span>";
+      card.innerHTML = '<span class="eyebrow">Agreement with visual scores</span><span class="small muted">' + pairs.length + " leaf" + (pairs.length === 1 ? "" : " records") + " with a visual 1–9 score so far. Add at least 5 to see how well the app agrees with your raters.</span>";
       return;
     }
-    var a = linCCC(pairs.map(function (r) { return r.result.diseasedPct; }), pairs.map(function (r) { return +r.meta.visual; }));
-    var verdict = a.ccc >= 0.9 ? "strong" : a.ccc >= 0.75 ? "good" : a.ccc >= 0.5 ? "moderate" : "poor";
-    card.innerHTML = '<span class="eyebrow">Agreement with visual estimates</span>' +
-      '<div class="agree-top"><b class="num">ρc = ' + a.ccc.toFixed(2) + '</b><span class="small">' + verdict + " agreement · " + a.n + " leaves</span></div>" +
-      '<span class="small muted">Lin\'s concordance between the app\'s % diseased and your visual estimates (1 = perfect). ' +
-      "Precision r = " + a.r.toFixed(2) + ", accuracy Cb = " + a.cb.toFixed(2) + ". On average the app reads " + Math.abs(a.bias).toFixed(1) +
-      " points " + (a.bias >= 0 ? "higher" : "lower") + " than the raters." + (a.ccc < 0.75 ? " Teaching the colours on a few of these leaves usually improves this." : "") + "</span>";
+    var app = pairs.map(function (r) { return r.result.score; }), eye = pairs.map(function (r) { return +r.meta.visualScore; });
+    var a = linCCC(app, eye);
+    var exact = 0, within1 = 0;
+    app.forEach(function (x, i) { var d = Math.abs(x - eye[i]); if (!d) exact++; if (d <= 1) within1++; });
+    var pc = function (k) { return Math.round(100 * k / app.length) + "%"; };
+    var ccc = isFinite(a.ccc) ? a.ccc : 0;
+    var verdict = ccc >= 0.9 ? "strong" : ccc >= 0.75 ? "good" : ccc >= 0.5 ? "moderate" : "poor";
+    card.innerHTML = '<span class="eyebrow">Agreement with visual 1–9 scores</span>' +
+      '<div class="agree-top"><b class="num">' + pc(exact) + '</b><span class="small">same score · <b>' + pc(within1) + "</b> within one score · " + a.n + " leaves</span></div>" +
+      '<span class="small">Lin\'s concordance ρc = <b class="num">' + ccc.toFixed(2) + "</b> (" + verdict + ")</span>" +
+      '<span class="small muted">Compares the app\'s BLS score with the score your raters gave by eye (ρc = 1 is perfect). ' +
+      (isFinite(a.r) ? "Precision r = " + a.r.toFixed(2) + ", accuracy Cb = " + a.cb.toFixed(2) + ". " : "") +
+      "On average the app scores " + Math.abs(a.bias).toFixed(1) + " " + (a.bias >= 0 ? "higher" : "lower") + " than the raters." +
+      (ccc < 0.75 ? " Teaching the colours on a few of these leaves usually improves this." : "") + "</span>";
   }
+
+  // ---------- visual 1-9 score ruler on the save form ----------
+  var visualScore = null;
+  (function () {
+    var html = "";
+    for (var k = 1; k <= 9; k++) html += '<button type="button" role="radio" aria-checked="false" data-vs="' + k + '" style="background:' + scoreColor(k) + '">' + k + "</button>";
+    $("visRuler").innerHTML = html;
+  })();
+  function setVisual(k) {
+    visualScore = k;
+    document.querySelectorAll("#visRuler button").forEach(function (b) { b.setAttribute("aria-checked", String(+b.dataset.vs === k)); });
+    $("visHint").textContent = k ? "Your score: " + k + " (" + E.category(k) + "). Tap again to clear." : "Tap the score you would give this leaf by eye. Tap again to clear.";
+  }
+  $("visRuler").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-vs]");
+    if (!b) return;
+    var k = +b.dataset.vs;
+    setVisual(visualScore === k ? null : k);
+    buzz(8);
+  });
 
   // ---------- edit a saved record ----------
   function showEditForm(sheet, rec) {
@@ -1572,7 +1599,7 @@
       '<div class="form">' + f("ePlot", "Plot / sample ID", m.plot) +
       '<div class="row2">' + f("eRep", "Rep", m.rep, "number") + f("eLeaf", "Leaf no.", m.leaf, "number") + "</div>" +
       f("eGenotype", "Genotype / entry", m.genotype) +
-      f("eVisual", "Visual estimate, % diseased", m.visual, "number") +
+      f("eVisual", "Visual BLS score (1–9)", m.visualScore, "number") +
       '<div class="row2">' + f("eTrial", "Trial", m.trial) + f("eRater", "Rater", m.rater) + "</div>" +
       '<div class="field"><label for="eNotes">Notes</label><textarea id="eNotes">' + esc(m.notes || "") + "</textarea></div></div>" +
       '<div class="sheet-actions"><button class="btn btn-primary" type="button" id="eSave">Save changes</button><button class="btn btn-ghost" type="button" id="eCancel">Cancel</button></div>';
@@ -1580,7 +1607,7 @@
     sheet.querySelector("#eSave").addEventListener("click", function () {
       var v = function (id) { return sheet.querySelector("#" + id).value.trim(); };
       if (!v("ePlot")) { sheet.querySelector("#ePlot").focus(); toast("Plot ID is required"); return; }
-      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes"), visual: v("eVisual") };
+      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes"), visualScore: /^[1-9]$/.test(v("eVisual")) ? +v("eVisual") : "" };
       rec.editedAt = new Date().toISOString();
       if (settings.destination !== "local") rec.sync = "pending";
       Records.put(rec).then(function () {
