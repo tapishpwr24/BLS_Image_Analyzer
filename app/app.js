@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.4.0";
+  var APP_VERSION = "0.5.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -117,6 +117,26 @@
     return ctx.getImageData(0, 0, w, h);
   }
 
+  // Score one photo, either the black-board way or inside a traced outline
+  function analyzeSection(sec, roi) {
+    var d = sec.imageData;
+    var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined);
+    sec.result = res;
+    sec.roi = roi || null;
+    sec.segmentation = roi ? "traced" : "black board";
+    sec.boardFraction = roi ? null : E.borderDarkFraction(d.data, d.width, d.height);
+    if (res.ok) {
+      var px = E.overlay(d.data, res.mask, 0.45);
+      // Darken everything outside the outline so it's clear what was scored
+      if (roi) for (var i = 0, p = 0; i < roi.length; i++, p += 4) {
+        if (!roi[i]) { px[p] *= 0.25; px[p + 1] *= 0.25; px[p + 2] *= 0.25; }
+      }
+      sec.overlayData = new ImageData(px, d.width, d.height);
+      delete res.mask;
+    }
+    return sec;
+  }
+
   function rebuildCurrent() {
     var secs = current.sections;
     current.result = secs.length > 1
@@ -127,6 +147,8 @@
     current.result.width = current.imageData.width;
     current.result.height = current.imageData.height;
     current.name = secs.map(function (x) { return x.name; }).join(" + ");
+    var segs = secs.map(function (x) { return x.segmentation; });
+    current.result.segmentation = segs.every(function (v) { return v === segs[0]; }) ? segs[0] : "mixed";
   }
 
   function handleFile(blob, name, isSample, asExample, append) {
@@ -138,27 +160,29 @@
     setTimeout(function () {
       decode(blob).then(function (bmp) {
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
-        var res = E.analyze(data.data, data.width, data.height);
         $("busy").hidden = true;
-        if (!res.ok) {
-          if (appending) { toast("No leaf found in that photo. Try the section again."); return; }
-          $("errorText").textContent = res.message;
-          analyzeState("error");
-          current = null;
-          return;
-        }
-        var sec = {
-          name: name, imageData: data, result: res,
-          overlayData: new ImageData(E.overlay(data.data, res.mask, 0.45), data.width, data.height)
-        };
-        delete res.mask;
-        if (appending) current.sections.push(sec);
-        else current = { sections: [sec], sample: !!isSample };
-        rebuildCurrent();
-        if (!appending) analyzeState(asExample ? "example" : "result");
-        renderResult();
-        if (!asExample) buzz(25);
-        if (appending) toast("Section " + current.sections.length + " added. Score updated for the whole leaf.");
+        var useTrace = settings.bgMode === "field" && !isSample;
+        return (useTrace ? openTracer(data) : Promise.resolve(null)).then(function (roi) {
+          if (useTrace && !roi) {           // outline cancelled
+            if (!appending) { analyzeState("capture"); current = null; }
+            return;
+          }
+          var sec = analyzeSection({ name: name, imageData: data }, roi);
+          if (!sec.result.ok) {
+            if (appending) { toast(sec.result.message); return; }
+            $("errorText").textContent = sec.result.message;
+            analyzeState("error");
+            current = null;
+            return;
+          }
+          if (appending) current.sections.push(sec);
+          else current = { sections: [sec], sample: !!isSample };
+          rebuildCurrent();
+          if (!appending) analyzeState(asExample ? "example" : "result");
+          renderResult();
+          if (!asExample) buzz(25);
+          if (appending) toast("Section " + current.sections.length + " added. Score updated for the whole leaf.");
+        });
       }).catch(function (e) {
         $("busy").hidden = true;
         if (appending) { toast("That photo could not be read. Try again."); return; }
@@ -180,9 +204,32 @@
       return '<span class="sec-chip">Section ' + (i + 1) + " · " + fmtPct(x.result.diseasedPct) +
         '<button type="button" data-rm="' + i + '" aria-label="Remove section ' + (i + 1) + '">×</button></span>';
     }).join("") : "";
+    var last = secs[secs.length - 1];
+    html += '<button class="add-sec solid" type="button" data-outline>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
+      (last.segmentation === "traced" ? "Redraw outline" : "Outline leaf") + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
+  // Outline (or redraw) the leaf on the latest section and re-score it
+  function outlineLastSection() {
+    if (!current) return;
+    var sec = current.sections[current.sections.length - 1];
+    openTracer(sec.imageData, sec.roi).then(function (roi) {
+      if (!roi) return;
+      var before = { result: sec.result, roi: sec.roi, segmentation: sec.segmentation, boardFraction: sec.boardFraction, overlayData: sec.overlayData };
+      analyzeSection(sec, roi);
+      if (!sec.result.ok) { toast(sec.result.message); Object.assign(sec, before); return; }
+      rebuildCurrent();
+      renderResult();
+      buzz(25);
+      toast("Scored inside your outline");
+    });
+  }
+  document.addEventListener("click", function (ev) {
+    if (ev.target.closest("[data-outline]")) outlineLastSection();
+  });
+
   $("sections").addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-rm]");
     if (!b || !current || current.sections.length < 2) return;
@@ -282,6 +329,8 @@
     if (!warn && r.leafPixels < 20000) warn = "The leaf covers only a small part of the photo. Move closer so the leaf fills the frame.";
     $("qcWarn").textContent = warn;
     $("qcWarn").hidden = !warn;
+    var noBoard = !current.sample && current.sections.some(function (x) { return x.segmentation === "black board" && x.boardFraction < 0.5; });
+    $("noBoardWarn").hidden = !noBoard;
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
     $("compBar").innerHTML = parts.map(function (p) { return '<i style="width:0;background:' + p[2] + '"></i>'; }).join("");
@@ -371,7 +420,8 @@
             leafPixels: r.leafPixels, healthyPixels: r.healthyPixels, chloroticPixels: r.chloroticPixels,
             necroticPixels: r.necroticPixels, healthyPct: r.healthyPct, chloroticPct: r.chloroticPct,
             necroticPct: r.necroticPct, diseasedPct: r.diseasedPct, score: r.score, category: r.category,
-            qc: r.qc, width: r.width, height: r.height, sections: r.sections || 1
+            qc: r.qc, width: r.width, height: r.height, sections: r.sections || 1,
+            segmentation: r.segmentation || "black board"
           },
           engine: E.VERSION, photo: blobs[0], overlay: blobs[1],
           sync: settings.destination === "local" ? "local" : "pending", syncError: null, remote: {}
@@ -416,7 +466,7 @@
       Notes: m.notes, Image_Width: r.width, Image_Height: r.height, Engine_Version: rec.engine,
       Device: "BLS Leaf Scorer " + APP_VERSION,
       Photo_URL: (rec.remote && rec.remote.photoUrl) || "", Overlay_URL: (rec.remote && rec.remote.overlayUrl) || "",
-      Sections: r.sections || 1, Edited_At: rec.editedAt || ""
+      Sections: r.sections || 1, Edited_At: rec.editedAt || "", Segmentation: r.segmentation || "black board"
     };
   }
 
@@ -582,6 +632,7 @@
     ];
     if (m.notes) kv.push(["Notes", m.notes]);
     if (r.sections > 1) kv.push(["Photographed in", r.sections + " sections"]);
+    kv.push(["Leaf separated by", r.segmentation === "traced" ? "Outline traced by hand" : r.segmentation === "mixed" ? "Board and outline" : "Black board"]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
     var wrap = document.createElement("div");
@@ -798,6 +849,143 @@
     $("view-analyze").prepend(card);
     try { history.replaceState(null, "", location.pathname); } catch (e) { /* ignore */ }
   }
+
+  // ---------- outline the leaf (field photos) ----------
+  var tr = null;   // tracer state while open
+
+  function openTracer(imageData, previousRoi) {
+    return new Promise(function (resolve) {
+      var W = imageData.width, H = imageData.height;
+      var base = document.createElement("canvas");
+      base.width = W; base.height = H;
+      base.getContext("2d").putImageData(imageData, 0, 0);
+      tr = { W: W, H: H, base: base, polys: [], cur: null, resolve: resolve };
+      $("tracer").hidden = false;
+      document.body.style.overflow = "hidden";
+      requestAnimationFrame(function () {
+        var stage = $("traceStage"), cv = $("traceCanvas");
+        var k = Math.min((stage.clientWidth - 12) / W, (stage.clientHeight - 12) / H);
+        var dpr = Math.min(2, window.devicePixelRatio || 1);
+        cv.style.width = Math.round(W * k) + "px";
+        cv.style.height = Math.round(H * k) + "px";
+        cv.width = Math.round(W * k * dpr);
+        cv.height = Math.round(H * k * dpr);
+        tr.k = k;
+        drawTrace();
+      });
+      updateTraceButtons();
+    });
+  }
+
+  function closeTracer(roi) {
+    $("tracer").hidden = true;
+    document.body.style.overflow = "";
+    var done = tr && tr.resolve;
+    tr = null;
+    if (done) done(roi || null);
+  }
+
+  function drawTrace() {
+    if (!tr) return;
+    var cv = $("traceCanvas"), ctx = cv.getContext("2d");
+    var sx = cv.width / tr.W, sy = cv.height / tr.H;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(tr.base, 0, 0, cv.width, cv.height);
+    var path = function (pts) {
+      ctx.beginPath();
+      pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0] * sx, q[1] * sy); else ctx.moveTo(q[0] * sx, q[1] * sy); });
+    };
+    if (tr.polys.length) {
+      // dim what is outside the outline
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+      tr.polys.forEach(function (pts) { pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0] * sx, q[1] * sy); else ctx.moveTo(q[0] * sx, q[1] * sy); }); ctx.closePath(); });
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fill("evenodd");
+      ctx.restore();
+    }
+    ctx.lineWidth = Math.max(2, 3 * (window.devicePixelRatio || 1));
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    tr.polys.forEach(function (pts) { path(pts); ctx.closePath(); ctx.strokeStyle = "#8fd19e"; ctx.stroke(); });
+    if (tr.cur && tr.cur.length > 1) { path(tr.cur); ctx.strokeStyle = "#f0c330"; ctx.stroke(); }
+  }
+
+  function updateTraceButtons() {
+    var n = tr ? tr.polys.length : 0;
+    $("trUse").disabled = !n;
+    $("trUndo").disabled = !n;
+    $("trClear").disabled = !n;
+    $("tracerHint").textContent = n
+      ? "Check that only the leaf is bright. Draw again to add a missed part, or Undo."
+      : "Trace around the leaf with your finger. Only what is inside the outline is scored.";
+  }
+
+  function tracePoint(ev) {
+    var rect = $("traceCanvas").getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(tr.W, (ev.clientX - rect.left) / rect.width * tr.W)),
+      Math.max(0, Math.min(tr.H, (ev.clientY - rect.top) / rect.height * tr.H))
+    ];
+  }
+  $("traceCanvas").addEventListener("pointerdown", function (ev) {
+    if (!tr) return;
+    ev.preventDefault();
+    try { $("traceCanvas").setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    tr.cur = [tracePoint(ev)];
+  });
+  $("traceCanvas").addEventListener("pointermove", function (ev) {
+    if (!tr || !tr.cur) return;
+    var q = tracePoint(ev), last = tr.cur[tr.cur.length - 1];
+    var minStep = 2 / (tr.k || 1);
+    if (Math.abs(q[0] - last[0]) + Math.abs(q[1] - last[1]) >= minStep) { tr.cur.push(q); drawTrace(); }
+  });
+  function endStroke() {
+    if (!tr || !tr.cur) return;
+    // ignore taps and tiny scribbles
+    var xs = tr.cur.map(function (q) { return q[0]; }), ys = tr.cur.map(function (q) { return q[1]; });
+    var span = (Math.max.apply(null, xs) - Math.min.apply(null, xs)) + (Math.max.apply(null, ys) - Math.min.apply(null, ys));
+    if (tr.cur.length >= 6 && span * (tr.k || 1) > 30) { tr.polys.push(tr.cur); buzz(10); }
+    tr.cur = null;
+    drawTrace();
+    updateTraceButtons();
+  }
+  $("traceCanvas").addEventListener("pointerup", endStroke);
+  $("traceCanvas").addEventListener("pointercancel", endStroke);
+  $("trUndo").addEventListener("click", function () { if (tr) { tr.polys.pop(); drawTrace(); updateTraceButtons(); } });
+  $("trClear").addEventListener("click", function () { if (tr) { tr.polys = []; drawTrace(); updateTraceButtons(); } });
+  $("trCancel").addEventListener("click", function () { closeTracer(null); });
+  $("trUse").addEventListener("click", function () {
+    if (!tr || !tr.polys.length) return;
+    // Rasterise the outline(s) at analysis resolution: 1 = inside
+    var c = document.createElement("canvas");
+    c.width = tr.W; c.height = tr.H;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff";
+    tr.polys.forEach(function (pts) {
+      ctx.beginPath();
+      pts.forEach(function (q, i) { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+      ctx.closePath();
+      ctx.fill();
+    });
+    var a = ctx.getImageData(0, 0, tr.W, tr.H).data;
+    var roi = new Uint8Array(tr.W * tr.H);
+    for (var i = 0, p = 3; i < roi.length; i++, p += 4) roi[i] = a[p] > 127 ? 1 : 0;
+    closeTracer(roi);
+  });
+  document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
+
+  function setBgMode(mode) {
+    settings.bgMode = mode === "field" ? "field" : "board";
+    Settings.save(settings);
+    document.querySelectorAll("#bgMode button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.bg === settings.bgMode)); });
+    var field = settings.bgMode === "field";
+    $("captureTitle").textContent = field ? "Photograph the leaf, then outline it" : "Photograph one leaf on the black board";
+    $("tipsBoard").hidden = field;
+    $("tipsField").hidden = !field;
+  }
+  document.querySelectorAll("#bgMode button").forEach(function (b) {
+    b.addEventListener("click", function () { setBgMode(b.dataset.bg); });
+  });
 
   // ---------- edit a saved record ----------
   function showEditForm(sheet, rec) {
@@ -1233,6 +1421,7 @@
   }
 
   // ---------- start ----------
+  setBgMode(settings.bgMode);
   fillPlotOptions();
   updateHeader();
   renderMethod();

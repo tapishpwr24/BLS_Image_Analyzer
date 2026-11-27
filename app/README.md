@@ -15,6 +15,7 @@ saved on the phone and copied to storage the user chooses.
 ## Features
 
 - **Score a leaf** from a camera or gallery photo: BLS score 1–9, diseased leaf area, category, and a colour overlay to check the classification.
+- **Field photos (no black board):** switch the capture screen to *Field photo*, then trace around the leaf with a finger after each photo. Only pixels inside the outline are scored, so soil and other plants are ignored (`Segmentation` = `traced`). In *Black board* mode the app warns when a photo has no black background and offers *Outline the leaf*. Black-board photos remain the most reliable and match the R pipeline.
 - **Long leaves:** tap *Add section* to photograph the rest of the leaf. Pixel counts from all sections are added up, so the score covers the whole leaf (`Sections` column).
 - **Plot list:** load your field book (a CSV with a `plot` column, plus optional genotype/entry, rep and trial). Plot IDs then autocomplete, genotype and rep fill in, the app warns about unknown or already-scored plots, offers *Next plot in list* after saving, and shows *Plots scored 34 / 120* with the list still to do.
 - **Edit a saved record** (plot, genotype, rep, leaf, trial, rater, notes). The score comes from the photo and can't be edited. Edits are re-synced, with `Edited_At` set and webhook event `update`.

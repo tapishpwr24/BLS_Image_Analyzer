@@ -24,7 +24,7 @@
     "BLS_Score", "Disease_Response", "QC_Status",
     "Latitude", "Longitude", "GPS_Accuracy_m", "Notes",
     "Image_Width", "Image_Height", "Engine_Version", "Device", "Photo_URL", "Overlay_URL",
-    "Sections", "Edited_At"
+    "Sections", "Edited_At", "Segmentation"
   ];
 
   function postJson(url, body, headers, plain) {

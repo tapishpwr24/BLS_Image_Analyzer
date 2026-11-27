@@ -66,13 +66,16 @@
    * Section 6: classify every pixel.
    * Mirrors R's rgb2hsv(): v = max, s = (max-min)/max, h in [0,1).
    */
-  function analyze(rgba, width, height, params) {
+  function analyze(rgba, width, height, params, roi) {
+    // roi (optional): Uint8Array, 1 = inside the outline the user traced.
+    // Only those pixels can count as leaf (field photos without a black board).
     var P = params || PARAMS;
     var n = width * height;
     var mask = new Uint8Array(n);
     var nLeaf = 0, nHealthy = 0, nChl = 0, nNec = 0;
 
     for (var i = 0, p = 0; i < n; i++, p += 4) {
+      if (roi && !roi[i]) continue;
       var r = rgba[p] / 255, g = rgba[p + 1] / 255, b = rgba[p + 2] / 255;
 
       if (!(r + g + b > P.LEAF_RGB_SUM_THRESHOLD)) continue; // background
@@ -112,7 +115,9 @@
       return {
         ok: false,
         qc: "FAILED",
-        message: "No leaf found. Photograph the leaf flat on a black background.",
+        message: roi
+          ? "The outline is too small or covers only dark pixels. Trace around the whole leaf."
+          : "No leaf found. Photograph the leaf flat on a black background, or switch to Field photo and outline the leaf.",
         width: width, height: height, leafPixels: nLeaf
       };
     }
@@ -181,8 +186,29 @@
     return out;
   }
 
+  /*
+   * Share of the photo's outer border that is black board. Low values mean the
+   * photo has no black background (soil, other plants…), so the black-board
+   * method would count background as leaf.
+   */
+  function borderDarkFraction(rgba, width, height, params) {
+    var P = params || PARAMS;
+    var band = Math.max(2, Math.round(Math.min(width, height) * 0.03));
+    var dark = 0, total = 0, step = 3;
+    for (var y = 0; y < height; y += step) {
+      for (var x = 0; x < width; x += step) {
+        if (x >= band && x < width - band && y >= band && y < height - band) continue;
+        var p = (y * width + x) * 4;
+        total++;
+        if ((rgba[p] + rgba[p + 1] + rgba[p + 2]) / 255 <= P.LEAF_RGB_SUM_THRESHOLD * 2) dark++;
+      }
+    }
+    return total ? dark / total : 1;
+  }
+
   return {
     VERSION: VERSION,
+    borderDarkFraction: borderDarkFraction,
     PARAMS: PARAMS,
     SCALE: SCALE,
     blsScore: blsScore,
