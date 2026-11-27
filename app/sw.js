@@ -7,7 +7,7 @@
  * - Every page response gets COOP/COEP headers. GitHub Pages can't set them,
  *   and they let the leaf finder use several CPU cores (about 3x faster).
  */
-var VERSION = "v0.7.0";
+var VERSION = "v0.8.0";
 var SHELL_CACHE = "bls-shell-" + VERSION;
 var MODEL_CACHE = "bls-models-v1";          // only bump when the model files change
 var SHELL = [
@@ -17,7 +17,7 @@ var SHELL = [
   "vendor/fonts/ibm-plex-sans-latin-500-normal.woff2", "vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
   "vendor/fonts/ibm-plex-mono-latin-500-normal.woff2",
   "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png",
-  "icons/apple-touch-icon.png", "icons/icon-maskable-512.png", "samples/BLS_02.jpg"
+  "icons/apple-touch-icon.png", "icons/icon-maskable-512.png", "samples/BLS_02.jpg", "samples/field_check.jpg"
 ];
 var HEAVY = /\/(models\/|vendor\/ort\/)/;   // big, versioned files: cache-first
 
@@ -59,8 +59,12 @@ self.addEventListener("fetch", function (e) {
     return;
   }
 
-  // App files: network first (to get updates), cache when offline
-  e.respondWith(fetch(req).then(function (res) {
+  // App files: network first (to get updates), cache when offline.
+  // "no-cache" makes the browser check with the server instead of reusing a
+  // stale copy, so phones get a new version as soon as it's published.
+  // (A navigation request can't take options, so fetch its URL instead.)
+  var fresh = req.mode === "navigate" ? fetch(req.url, { cache: "no-cache", credentials: "same-origin" }) : fetch(req, { cache: "no-cache" });
+  e.respondWith(fresh.then(function (res) {
     if (res.ok) {
       var copy = res.clone();
       caches.open(SHELL_CACHE).then(function (c) { c.put(req, copy); });

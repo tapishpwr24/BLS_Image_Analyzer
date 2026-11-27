@@ -43,6 +43,7 @@ async function fetchBytes(url, onBytes) {
 }
 
 export function isLoaded() { return !!sessions; }
+export function threads() { return ort ? ort.env.wasm.numThreads : 0; }
 
 export function load(onProgress) {
   if (sessions) return Promise.resolve();
@@ -50,8 +51,11 @@ export function load(onProgress) {
   loading = (async () => {
     ort = await import(ORT_DIR + "ort.wasm.min.mjs");
     ort.env.wasm.wasmPaths = ORT_DIR;
-    // Threads need a cross-origin isolated page; otherwise run single-threaded
-    ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+    // Threads need a cross-origin isolated page; otherwise run single-threaded.
+    // After a failure the app sets bls-sam-threads=1 so the next try is single-threaded.
+    let single = false;
+    try { single = localStorage.getItem("bls-sam-threads") === "1"; } catch (e) { /* ignore */ }
+    ort.env.wasm.numThreads = self.crossOriginIsolated && !single ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
     const sizes = [8882165, 4903810];  // encoder, decoder (for a smooth progress bar)
     const done = [0, 0];
     const report = () => onProgress && onProgress((done[0] + done[1]) / (sizes[0] + sizes[1]));
@@ -156,13 +160,15 @@ export async function autoMask(h, imageData) {
   const cx = c.getContext("2d", { willReadFrequently: true });
   cx.drawImage(src, 0, 0, gw, gh);
   const px = cx.getImageData(0, 0, gw, gh).data;
-  const plant = new Uint8Array(gw * gh);
+  const plant = new Uint8Array(gw * gh), skin = new Uint8Array(gw * gh);
   for (let i = 0, p = 0; i < plant.length; i++, p += 4) {
     const r = px[p] / 255, g = px[p + 1] / 255, b = px[p + 2] / 255;
     const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, sat = max ? d / max : 0;
     let hue = 0;
     if (d > 0) { hue = max === r ? (g - b) / d : max === g ? 2 + (b - r) / d : 4 + (r - g) / d; hue /= 6; if (hue < 0) hue += 1; }
-    plant[i] = max > 0.2 && sat > 0.2 && (hue < 0.5 || hue > 0.95) ? 1 : 0;
+    // Hands: reddish (hue 0-32 deg) with red clearly above green; leaf brown/tan is yellower
+    skin[i] = max > 0.3 && sat > 0.15 && sat < 0.7 && (hue < 30 / 360 || hue > 345 / 360) && (r - g) / r >= 0.19 ? 1 : 0;
+    plant[i] = !skin[i] && max > 0.2 && sat > 0.2 && (hue < 0.5 || hue > 0.95) ? 1 : 0;
   }
   const pts = [];
   for (let gy = 0.3; gy <= 0.701; gy += 0.1) {
@@ -185,21 +191,71 @@ export async function autoMask(h, imageData) {
   for (let b = 0; b < B; b++) {
     for (let k = 0; k < 3; k++) {
       const off = (b * 3 + k) * 256 * 256;
-      const sc = leafiness(masks, off, gw, gh, plant, iou[b * 3 + k]);
-      if (sc > best.score) best = { score: sc, off, point: pts[b], iou: iou[b * 3 + k] };
+      const sc = leafiness(masks, off, gw, gh, plant, skin, iou[b * 3 + k]);
+      if (sc.score > best.score) best = { score: sc.score, skinFrac: sc.skinFrac, area: sc.area, off, point: pts[b], iou: iou[b * 3 + k] };
     }
   }
   if (best.score < 0) return null;   // nothing leaf-like found
-  const logits = masks.subarray(best.off, best.off + 256 * 256);
-  return { roi: finish(h, logits, [best.point]), score: best.iou, point: { x: best.point.x, y: best.point.y, label: 1, auto: true } };
+  let logits = masks.subarray(best.off, best.off + 256 * 256);
+  const pos = { x: best.point.x, y: best.point.y, label: 1, auto: true };
+  let points = [pos];
+
+  // A hand still inside the leaf mask: re-run with "not leaf" points on the skin
+  if (best.skinFrac > 0.005) {
+    const negs = skinPoints(masks, best.off, gw, gh, skin, h);
+    if (negs.length) {
+      const all = [pos].concat(negs);
+      const c2 = new Float32Array(all.length * 2), l2 = new BigInt64Array(all.length);
+      all.forEach((p, i) => { c2[2 * i] = p.x * h.k; c2[2 * i + 1] = p.y * h.k; l2[i] = BigInt(p.label); });
+      const o2 = await sessions.dec.run({
+        input_points: new ort.Tensor("float32", c2, [1, 1, all.length, 2]),
+        input_labels: new ort.Tensor("int64", l2, [1, 1, all.length]),
+        image_embeddings: h.emb,
+        image_positional_embeddings: h.pos
+      });
+      let b2 = null;
+      for (let k = 0; k < 3; k++) {
+        const sc = leafiness(o2.pred_masks.data, k * 256 * 256, gw, gh, plant, skin, o2.iou_scores.data[k]);
+        if (sc.score > 0 && sc.skinFrac < best.skinFrac && sc.area > 0.5 * best.area && (!b2 || sc.score > b2.score)) b2 = { score: sc.score, k };
+      }
+      if (b2) {
+        logits = o2.pred_masks.data.subarray(b2.k * 256 * 256, (b2.k + 1) * 256 * 256);
+        points = all.map((p) => Object.assign({ auto: true }, p));
+      }
+    }
+  }
+  return { roi: finish(h, logits, [pos]), score: best.iou, point: pos, points: points };
 }
 
-function leafiness(masks, off, gw, gh, plant, iou) {
+// Centres of the largest skin patches touching the chosen mask (up to 3)
+function skinPoints(masks, off, gw, gh, skin, h) {
+  const n = gw * gh, seen = new Uint8Array(n), stack = new Int32Array(n), blobs = [];
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!skin[s0] || seen[s0]) continue;
+    let sp = 0, size = 0, sx = 0, sy = 0, inMask = 0;
+    stack[sp++] = s0; seen[s0] = 1;
+    while (sp) {
+      const i = stack[--sp], x = i % gw, y = (i - x) / gw;
+      size++; sx += x; sy += y;
+      if (masks[off + y * 256 + x] > 0) inMask++;
+      if (x > 0 && skin[i - 1] && !seen[i - 1]) { seen[i - 1] = 1; stack[sp++] = i - 1; }
+      if (x < gw - 1 && skin[i + 1] && !seen[i + 1]) { seen[i + 1] = 1; stack[sp++] = i + 1; }
+      if (i >= gw && skin[i - gw] && !seen[i - gw]) { seen[i - gw] = 1; stack[sp++] = i - gw; }
+      if (i < n - gw && skin[i + gw] && !seen[i + gw]) { seen[i + gw] = 1; stack[sp++] = i + gw; }
+    }
+    if (size >= 0.01 * n && inMask) blobs.push({ size, x: sx / size, y: sy / size });
+  }
+  blobs.sort((a, b) => b.size - a.size);
+  // grid -> image pixels: grid cell = 4 px in the 1024 frame
+  return blobs.slice(0, 3).map((b) => ({ x: (b.x + 0.5) * 4 / h.k, y: (b.y + 0.5) * 4 / h.k, label: 0 }));
+}
+
+function leafiness(masks, off, gw, gh, plant, skin, iou) {
   const n = gw * gh, lo = new Uint8Array(n);
   let area = 0;
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (masks[off + y * 256 + x] > 0) { lo[y * gw + x] = 1; area++; }
   const fa = area / n;
-  if (fa < 0.01 || fa > 0.6) return -1;
+  if (fa < 0.01 || fa > 0.6) return { score: -1, skinFrac: 1, area: fa };
   // largest connected part
   const ids = new Int32Array(n), stack = new Int32Array(n);
   let bestId = 0, bestSize = 0, id = 0;
@@ -215,11 +271,11 @@ function leafiness(masks, off, gw, gh, plant, iou) {
     }
     if (size > bestSize) { bestSize = size; bestId = id; }
   }
-  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, pl = 0;
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, pl = 0, sk = 0;
   for (let i = 0; i < n; i++) {
     if (ids[i] !== bestId) continue;
     const x = i % gw, y = (i - x) / gw;
-    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; pl += plant[i];
+    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; pl += plant[i]; sk += skin[i];
   }
   const N = bestSize, mx = sx / N, my = sy / N;
   const cxx = sxx / N - mx * mx, cyy = syy / N - my * my, cxy = sxy / N - mx * my;
@@ -228,7 +284,9 @@ function leafiness(masks, off, gw, gh, plant, iou) {
   const elong = Math.sqrt(l1 / l2);
   const plantFrac = pl / N;
   const cent = 1 - Math.min(1, 2 * Math.hypot(mx / gw - 0.5, my / gh - 0.5));
-  return iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5);
+  const skinFrac = sk / N;
+  const score = iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5) * Math.max(0, 1 - 3 * skinFrac);
+  return { score, skinFrac, area: fa };
 }
 
 // Keep only the regions touching a leaf point (drops stray neighbouring leaves)

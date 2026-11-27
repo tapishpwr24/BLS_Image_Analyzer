@@ -703,6 +703,8 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     <div class="card">
       <h3>This phone</h3>
       <div class="small" id="phoneInfo" style="display:grid;gap:4px"></div>
+      <button class="btn btn-soft" type="button" id="checkFinder">Check the leaf finder</button>
+      <div class="status-line" id="finderStatus" role="status"></div>
     </div>
 
     <details class="card method">
@@ -726,7 +728,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 
 <div class="tracer" id="tracer" hidden role="dialog" aria-modal="true" aria-labelledby="tracerTitle">
   <div class="tracer-head">
-    <div class="tracer-top"><b id="tracerTitle">Find the leaf</b><button type="button" id="trCancel">Cancel</button></div>
+    <div class="tracer-top"><b id="tracerTitle">Find the leaf</b><span style="display:flex;gap:16px"><button type="button" id="trWhole">Whole photo is leaf</button><button type="button" id="trCancel">Cancel</button></span></div>
     <span id="tracerHint">Finding the leaf…</span>
   </div>
   <div class="tracer-stage" id="traceStage"><canvas id="traceCanvas"></canvas>

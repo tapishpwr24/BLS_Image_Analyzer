@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.7.0";
+  var APP_VERSION = "0.8.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -41,10 +41,13 @@
   }
   function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* not supported */ } }
   function countUp(el, to, decimals, suffix) {
+    var token = {};
+    el._countUp = token;   // a newer animation on the same element stops this one
     if (reduceMotion) { el.textContent = to.toFixed(decimals) + suffix; return; }
     var start = performance.now(), dur = 700;
     (function step(now) {
-      var t = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - t, 3);
+      if (el._countUp !== token) return;
+      var t = Math.min(1, Math.max(0, (now - start) / dur)), e = 1 - Math.pow(1 - t, 3);
       el.textContent = (to * e).toFixed(decimals) + suffix;
       if (t < 1) requestAnimationFrame(step);
     })(start);
@@ -169,11 +172,14 @@
       decode(blob).then(function (bmp) {
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
         return (isSample ? Promise.resolve({ found: null }) : findLeaf(data)).then(function (step) {
+          if (asExample && userActed) return { cancelled: true, stale: true };
           $("busy").hidden = true;
           // Leaf couldn't be found automatically: let the person mark it
           return step.manual ? openTracer(data, { method: "traced", reason: step.reason }).then(function (f) { return { found: f, cancelled: !f }; }) : step;
         }).then(function (step) {
           var found = step.found;
+          // The example leaf must never replace a photo the person has taken
+          if (step.stale || (asExample && userActed)) return;
           if (step.cancelled) {
             if (!appending) { analyzeState("capture"); current = null; }
             return;
@@ -230,13 +236,21 @@
         })
         .then(function (h) { return m.autoMask(h, data); });
     }).then(function (a) {
-      if (a) return { found: { roi: a.roi, method: "auto", points: [a.point] } };
-      if (bm.area > 0.7) return { found: null };          // cropped to the leaf already
-      return { manual: true, reason: "The app couldn't find a leaf in the middle of this photo." };
+      if (a) { noteFinder(null); return { found: { roi: a.roi, method: "auto", points: a.points || [a.point] } }; }
+      // Never score a field photo whole: ask the person instead
+      return { manual: true, reason: "The app couldn't find a single leaf in this photo." };
     }, function (e) {
-      if (bm.area > 0.7) return { found: null };
-      return { manual: true, reason: "The automatic leaf finder isn't available here (" + (e && e.message ? e.message : "error") + ")." };
+      noteFinder(e);
+      return { manual: true, reason: "The automatic leaf finder couldn't run on this phone (" + (e && e.message ? e.message : "error") + ")." };
     });
+  }
+
+  // Remember leaf-finder problems; after a failure, use one thread next time
+  function noteFinder(e) {
+    settings.finderError = e ? String(e && e.message || e).slice(0, 200) : "";
+    settings.finderOk = !e;
+    Settings.save(settings);
+    try { if (e) localStorage.setItem("bls-sam-threads", "1"); } catch (x) { /* ignore */ }
   }
 
   $("secInput").addEventListener("change", function (ev) {
@@ -285,8 +299,13 @@
     renderResult();
   });
 
+  var userActed = false;   // once true, the app never reloads itself
+  ["camInput", "fileInput", "secInput"].forEach(function (id) {
+    $(id).addEventListener("click", function () { userActed = true; });
+  });
   ["camInput", "fileInput"].forEach(function (id) {
     $(id).addEventListener("change", function (ev) {
+      userActed = true;
       var f = ev.target.files && ev.target.files[0];
       if (f) handleFile(f, f.name || ("leaf-" + Date.now() + ".jpg"), false, false);
       ev.target.value = "";
@@ -940,7 +959,8 @@
       base.width = W; base.height = H;
       base.getContext("2d").putImageData(imageData, 0, 0);
       tr = { W: W, H: H, base: base, imageData: imageData, polys: [], cur: null, resolve: resolve,
-        mode: "auto", sign: 1, points: [], roi: null, layer: null, handle: null, busy: false, prev: prev || null };
+        mode: "auto", sign: 1, points: [], roi: null, layer: null, handle: null, busy: false, prev: prev || null,
+        autoError: prev && prev.reason ? prev.reason : null };
       $("tracer").hidden = false;
       document.body.style.overflow = "hidden";
       requestAnimationFrame(function () {
@@ -1232,6 +1252,7 @@
     else { tr.polys = []; drawTrace(); updateTraceButtons(); }
   });
   $("trCancel").addEventListener("click", function () { closeTracer(null); });
+  $("trWhole").addEventListener("click", function () { if (tr) closeTracer({ roi: null, method: "whole photo", points: null }); });
   $("trUse").addEventListener("click", function () {
     if (!tr) return;
     if (tr.mode === "auto") {
@@ -1681,6 +1702,8 @@
     var lines = [];
     lines.push(isInstalled() ? "✓ Installed as an app" : "Running in the browser. Install it from the Analyze tab for offline use.");
     lines.push(navigator.onLine === false ? "Offline: records will sync when you're back online" : "Online");
+    lines.push("App version " + APP_VERSION + " · engine " + E.VERSION);
+    lines.push(settings.finderOk ? "✓ AI leaf finder worked on this phone" : settings.finderError ? "✗ AI leaf finder failed last time: " + settings.finderError : "AI leaf finder not used yet. Tap Check the leaf finder.");
     var box = $("phoneInfo");
     var paint = function () { box.innerHTML = lines.map(function (l) { return "<span>" + esc(l) + "</span>"; }).join(""); };
     paint();
@@ -1693,6 +1716,36 @@
       }).catch(function () {});
     }
   }
+
+  // Settings → Check the leaf finder: load the model and find the leaf in a test photo
+  $("checkFinder").addEventListener("click", function () {
+    var out = $("finderStatus"), btn = $("checkFinder");
+    btn.disabled = true;
+    out.className = "status-line ok";
+    out.textContent = "Loading the leaf finder…";
+    var t0 = performance.now();
+    var img;
+    fetch("samples/field_check.jpg").then(function (r) { return r.blob(); }).then(decode).then(function (bmp) {
+      img = toImageData(bmp, MAX_ANALYSIS_SIDE);
+      return getSeg();
+    }).then(function (m) {
+      return m.load(function (f) { out.textContent = "Downloading the leaf finder… " + Math.round(f * 100) + "% of 25 MB"; }).then(function () { return m; });
+    }).then(function (m) {
+      out.textContent = "Finding the leaf in a test photo…";
+      var t1 = performance.now();
+      return m.embed(img).then(function (h) { return m.autoMask(h, img); }).then(function (a) {
+        if (!a) throw new Error("no leaf found in the test photo");
+        var res = E.analyze(img.data, img.width, img.height, undefined, a.roi, "v2");
+        noteFinder(null);
+        out.textContent = "✓ Leaf finder works: found the leaf in " + ((performance.now() - t1) / 1000).toFixed(1) + " s using " + m.threads() +
+          " CPU thread" + (m.threads() === 1 ? "" : "s") + " (test leaf scored " + fmtPct(res.diseasedPct) + " diseased).";
+      });
+    }).catch(function (e) {
+      noteFinder(e);
+      out.className = "status-line err";
+      out.textContent = "✗ Leaf finder failed: " + (e && e.message ? e.message : e) + ". Tap again to retry with one CPU thread (reload the app first).";
+    }).then(function () { btn.disabled = false; renderPhoneInfo(); });
+  });
 
   // ---------- start ----------
   $("rules-" + (settings.rules === "r1" ? "r1" : "v2")).checked = true;
@@ -1717,7 +1770,7 @@
       navigator.serviceWorker.addEventListener("controllerchange", function () {
         var did = false;
         try { did = sessionStorage.getItem("bls-coi-reload") === "1"; sessionStorage.setItem("bls-coi-reload", "1"); } catch (e) { did = true; }
-        if (!self.crossOriginIsolated && !did && (!current || current.sample) && $("tracer").hidden) location.reload();
+        if (!self.crossOriginIsolated && !did && !userActed && (!current || current.sample) && $("tracer").hidden && $("busy").hidden) location.reload();
       });
     } catch (e) { /* not available here */ }
   }
