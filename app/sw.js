@@ -7,7 +7,7 @@
  * - Every page response gets COOP/COEP headers. GitHub Pages can't set them,
  *   and they let the leaf finder use several CPU cores (about 3x faster).
  */
-var VERSION = "v0.6.0";
+var VERSION = "v0.7.0";
 var SHELL_CACHE = "bls-shell-" + VERSION;
 var MODEL_CACHE = "bls-models-v1";          // only bump when the model files change
 var SHELL = [

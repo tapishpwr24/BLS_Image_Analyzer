@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.6.0";
+  var APP_VERSION = "0.7.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -117,17 +117,18 @@
     return ctx.getImageData(0, 0, w, h);
   }
 
-  // Score one photo, either the black-board way or inside a traced outline
-  // found: null (black board) or {roi, method, points} from the leaf finder
+  // Score one photo inside the leaf region the app found.
+  // found: {roi, method, points?, labels?, leafCount?} or null (whole photo is leaf)
   function analyzeSection(sec, found) {
-    var roi = found ? found.roi : null;
+    var roi = found && found.roi ? found.roi : null;
     var d = sec.imageData;
-    var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined);
+    var res = E.analyze(d.data, d.width, d.height, undefined, roi || undefined, settings.rules === "r1" ? "r1" : "v2");
     sec.result = res;
     sec.roi = roi || null;
-    sec.segmentation = found ? found.method : "black board";
+    sec.found = found || null;
+    sec.segmentation = found ? found.method : "whole photo";
     sec.samPoints = found && found.points ? found.points : null;
-    sec.boardFraction = roi ? null : E.borderDarkFraction(d.data, d.width, d.height);
+    sec.perLeaf = res.ok && found && found.labels && found.leafCount > 1 ? E.perRegion(res.mask, found.labels, found.leafCount) : null;
     if (res.ok) {
       var px = E.overlay(d.data, res.mask, 0.45);
       // Darken everything outside the outline so it's clear what was scored
@@ -152,6 +153,10 @@
     current.name = secs.map(function (x) { return x.name; }).join(" + ");
     var segs = secs.map(function (x) { return x.segmentation; });
     current.result.segmentation = segs.every(function (v) { return v === segs[0]; }) ? segs[0] : "mixed";
+    current.result.rules = secs[0].result.rules;
+    var per = [];
+    secs.forEach(function (x) { if (x.perLeaf) per = per.concat(x.perLeaf); });
+    current.result.perLeaf = per.length > 1 ? per : null;
   }
 
   function handleFile(blob, name, isSample, asExample, append) {
@@ -163,10 +168,13 @@
     setTimeout(function () {
       decode(blob).then(function (bmp) {
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
-        $("busy").hidden = true;
-        var useTrace = settings.bgMode === "field" && !isSample;
-        return (useTrace ? openTracer(data) : Promise.resolve(null)).then(function (found) {
-          if (useTrace && !found) {         // cancelled
+        return (isSample ? Promise.resolve({ found: null }) : findLeaf(data)).then(function (step) {
+          $("busy").hidden = true;
+          // Leaf couldn't be found automatically: let the person mark it
+          return step.manual ? openTracer(data, { method: "traced", reason: step.reason }).then(function (f) { return { found: f, cancelled: !f }; }) : step;
+        }).then(function (step) {
+          var found = step.found;
+          if (step.cancelled) {
             if (!appending) { analyzeState("capture"); current = null; }
             return;
           }
@@ -195,6 +203,42 @@
     }, 30);
   }
 
+  /*
+   * Automatic leaf separation:
+   *  1. Board or dark cloth behind the leaf: separate by colour (instant), keeps several leaves.
+   *  2. Anything else (field, hand, soil, other plants): AI leaf finder picks the leaf.
+   *  3. Photo already cropped to the leaf: score the whole photo.
+   *  4. Otherwise ask the person to mark the leaf.
+   */
+  function busyText(title, text) {
+    $("busyTitle").textContent = title;
+    $("busyText").textContent = text;
+  }
+  function findLeaf(data) {
+    busyText("Finding the leaf…", "Separating the leaf from the background");
+    var bm = E.boardMask(data.data, data.width, data.height);
+    if (bm.boardLike) {
+      return Promise.resolve({ found: { roi: bm.roi, method: "board", labels: bm.labels, leafCount: bm.leafCount } });
+    }
+    return getSeg().then(function (m) {
+      if (!m.isLoaded()) busyText("Getting the leaf finder ready…", "First time only: downloading about 25 MB, then it works offline");
+      return m.load(function (f) { busyText("Getting the leaf finder ready…", "First time only: downloading " + Math.round(f * 100) + "% of 25 MB"); })
+        .then(function () {
+          busyText("Finding the leaf…", "The AI leaf finder is separating the leaf from the background");
+          var cached = samCache.get(data);
+          return cached ? cached : m.embed(data).then(function (h) { samCache.set(data, h); return h; });
+        })
+        .then(function (h) { return m.autoMask(h, data); });
+    }).then(function (a) {
+      if (a) return { found: { roi: a.roi, method: "auto", points: [a.point] } };
+      if (bm.area > 0.7) return { found: null };          // cropped to the leaf already
+      return { manual: true, reason: "The app couldn't find a leaf in the middle of this photo." };
+    }, function (e) {
+      if (bm.area > 0.7) return { found: null };
+      return { manual: true, reason: "The automatic leaf finder isn't available here (" + (e && e.message ? e.message : "error") + ")." };
+    });
+  }
+
   $("secInput").addEventListener("change", function (ev) {
     var f = ev.target.files && ev.target.files[0];
     if (f && current) handleFile(f, f.name || ("section-" + Date.now() + ".jpg"), false, false, true);
@@ -210,7 +254,7 @@
     var last = secs[secs.length - 1];
     html += '<button class="add-sec solid" type="button" data-outline>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
-      (last.segmentation === "black board" ? "Find leaf edges" : "Adjust leaf edges") + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
+      "Adjust leaf edges" + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
@@ -218,7 +262,7 @@
   function outlineLastSection() {
     if (!current) return;
     var sec = current.sections[current.sections.length - 1];
-    openTracer(sec.imageData, { points: sec.samPoints, method: sec.segmentation }).then(function (found) {
+    openTracer(sec.imageData, { points: sec.samPoints, method: sec.segmentation, roi: sec.roi }).then(function (found) {
       if (!found) return;
       var before = { result: sec.result, roi: sec.roi, segmentation: sec.segmentation, boardFraction: sec.boardFraction, overlayData: sec.overlayData, samPoints: sec.samPoints };
       analyzeSection(sec, found);
@@ -332,8 +376,16 @@
     if (!warn && r.leafPixels < 20000) warn = "The leaf covers only a small part of the photo. Move closer so the leaf fills the frame.";
     $("qcWarn").textContent = warn;
     $("qcWarn").hidden = !warn;
-    var noBoard = !current.sample && current.sections.some(function (x) { return x.segmentation === "black board" && x.boardFraction < 0.5; });
-    $("noBoardWarn").hidden = !noBoard;
+    $("noBoardWarn").hidden = true;
+    var per = r.perLeaf;
+    $("perLeaf").hidden = !per;
+    if (per) {
+      $("perLeaf").innerHTML = '<span class="eyebrow">' + per.length + " leaves in this photo</span>" + per.map(function (q, i) {
+        return '<span class="leaf-chip"><i class="mini-score num" style="background:' + scoreColor(q.score) + '">' + q.score + "</i>Leaf " + (i + 1) + ' <b class="num">' + fmtPct(q.diseasedPct) + "</b></span>";
+      }).join("");
+    }
+    $("methodNote").textContent = ({ board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
+      "auto + taps": "Leaf found automatically, adjusted by you", traced: "Leaf outlined by you", "whole photo": "Whole photo scored as leaf", mixed: "Sections separated in different ways" })[r.segmentation] || "";
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
     $("compBar").innerHTML = parts.map(function (p) { return '<i style="width:0;background:' + p[2] + '"></i>'; }).join("");
@@ -424,7 +476,8 @@
             necroticPixels: r.necroticPixels, healthyPct: r.healthyPct, chloroticPct: r.chloroticPct,
             necroticPct: r.necroticPct, diseasedPct: r.diseasedPct, score: r.score, category: r.category,
             qc: r.qc, width: r.width, height: r.height, sections: r.sections || 1,
-            segmentation: r.segmentation || "black board"
+            segmentation: r.segmentation || "whole photo", rules: r.rules || "v2",
+            perLeaf: r.perLeaf ? r.perLeaf.map(function (q) { return { diseasedPct: q.diseasedPct, score: q.score }; }) : null
           },
           engine: E.VERSION, photo: blobs[0], overlay: blobs[1],
           sync: settings.destination === "local" ? "local" : "pending", syncError: null, remote: {}
@@ -469,7 +522,10 @@
       Notes: m.notes, Image_Width: r.width, Image_Height: r.height, Engine_Version: rec.engine,
       Device: "BLS Leaf Scorer " + APP_VERSION,
       Photo_URL: (rec.remote && rec.remote.photoUrl) || "", Overlay_URL: (rec.remote && rec.remote.overlayUrl) || "",
-      Sections: r.sections || 1, Edited_At: rec.editedAt || "", Segmentation: r.segmentation || "black board"
+      Sections: r.sections || 1, Edited_At: rec.editedAt || "", Segmentation: r.segmentation || "whole photo",
+      Rules: r.rules === "r1" ? "R script v1.0" : "calibrated v2", Leaf_Count: r.perLeaf ? r.perLeaf.length : 1,
+      Per_Leaf_Diseased_Percent: r.perLeaf ? r.perLeaf.map(function (q) { return q.diseasedPct; }).join("; ") : "",
+      Per_Leaf_BLS_Score: r.perLeaf ? r.perLeaf.map(function (q) { return q.score; }).join("; ") : ""
     };
   }
 
@@ -636,6 +692,8 @@
     if (m.notes) kv.push(["Notes", m.notes]);
     if (r.sections > 1) kv.push(["Photographed in", r.sections + " sections"]);
     kv.push(["Leaf separated by", segLabel(r.segmentation)]);
+    kv.push(["Scoring rules", r.rules === "r1" ? "R script v1.0" : "Calibrated v2"]);
+    if (r.perLeaf) kv.push(["Per leaf", r.perLeaf.map(function (q, i) { return "Leaf " + (i + 1) + ": " + fmtPct(q.diseasedPct) + " (BLS " + q.score + ")"; }).join(" · ")]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
     var wrap = document.createElement("div");
@@ -783,6 +841,14 @@
     refreshPending().then(syncPending);
   });
 
+  document.querySelectorAll('input[name="rules"]').forEach(function (r) {
+    r.addEventListener("change", function () {
+      settings.rules = r.value;
+      Settings.save(settings);
+      toast(r.value === "r1" ? "New photos use the R script v1.0 rules" : "New photos use the calibrated v2 rules");
+    });
+  });
+
   $("saveDefaults").addEventListener("click", function () {
     settings.trial = $("dTrial").value.trim();
     settings.rater = $("dRater").value.trim();
@@ -862,7 +928,7 @@
   var samCache = new WeakMap();   // imageData -> image embedding, so re-opening is instant
 
   function segLabel(v) {
-    return { "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
+    return { "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
       "traced": "Outline traced by hand", "mixed": "Mixed methods", "black board": "Black board" }[v] || v || "Black board";
   }
   function getSeg() { return segModule ? Promise.resolve(segModule) : import("./segment.js").then(function (m) { return (segModule = m); }); }
@@ -874,7 +940,7 @@
       base.width = W; base.height = H;
       base.getContext("2d").putImageData(imageData, 0, 0);
       tr = { W: W, H: H, base: base, imageData: imageData, polys: [], cur: null, resolve: resolve,
-        mode: "auto", sign: 1, points: [], roi: null, layer: null, handle: null, busy: false };
+        mode: "auto", sign: 1, points: [], roi: null, layer: null, handle: null, busy: false, prev: prev || null };
       $("tracer").hidden = false;
       document.body.style.overflow = "hidden";
       requestAnimationFrame(function () {
@@ -920,9 +986,40 @@
     updateTraceButtons();
   }
 
+  // Load the model and analyse this photo once (cached), then call back
+  function ensureHandle() {
+    var mine = tr;
+    if (tr.handle) return Promise.resolve(tr.handle);
+    tr.busy = true;
+    updateTraceButtons();
+    traceBusy("Starting the leaf finder…");
+    return getSeg().then(function (m) {
+      if (!m.isLoaded()) traceBusy("Downloading the leaf finder (first time only)…");
+      return m.load(function (f) { if (tr === mine) traceBusy("Downloading the leaf finder (first time only)… " + Math.round(f * 100) + "%"); }).then(function () { return m; });
+    }).then(function (m) {
+      var cached = samCache.get(mine.imageData);
+      if (cached) return cached;
+      traceBusy("Finding the leaf…");
+      return m.embed(mine.imageData).then(function (h) { samCache.set(mine.imageData, h); return h; });
+    }).then(function (h) {
+      if (tr === mine) { tr.handle = h; tr.busy = false; }
+      return h;
+    });
+  }
+
   function startAuto(prev) {
     var mine = tr;
     if (tr.handle) { if (!tr.roi) runMask(); return; }
+    // Show the region the app already found; the model only loads if the person taps
+    if (prev && prev.roi && !(prev.points && prev.points.length)) {
+      tr.roi = prev.roi;
+      tr.area = 1;
+      buildMaskLayer();
+      traceHint("Leaf area found automatically. Tap the leaf to re-detect it, or tap − Not leaf and then background to remove it.");
+      drawTrace();
+      updateTraceButtons();
+      return;
+    }
     tr.busy = true;
     traceHint("Finding the leaf edges…");
     traceBusy("Starting the leaf finder…");
@@ -938,8 +1035,16 @@
     }).then(function (h) {
       if (tr !== mine || !h) return;
       tr.handle = h;
-      tr.points = prev && prev.points && prev.points.length ? prev.points.slice() : [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }];
-      return runMask();
+      if (prev && prev.points && prev.points.length) { tr.points = prev.points.slice(); return runMask(); }
+      // No earlier points: let the leaf finder pick the leaf itself
+      traceBusy("Finding the leaf…");
+      return segModule.autoMask(h, mine.imageData).then(function (a) {
+        if (tr !== mine) return;
+        if (a) { tr.points = [a.point]; tr.autoPoint = a.point; return runMask(); }
+        tr.busy = false; traceBusy(null); tr.points = [];
+        traceHint((prev && prev.reason ? prev.reason + " " : "") + "Tap on the leaf, or use Draw by hand.");
+        updateTraceButtons();
+      });
     }).catch(function (e) {
       if (tr !== mine) return;
       tr.busy = false;
@@ -1070,15 +1175,26 @@
     if (!tr) return;
     if (tr.mode === "auto") {
       // a tap (not a drag) adds a + or − point and re-runs the decoder
-      if (!tr.down || tr.busy || !tr.handle) return;
+      if (!tr.down || tr.busy) return;
       var moved = Math.abs(ev.clientX - tr.down[0]) + Math.abs(ev.clientY - tr.down[1]);
       tr.down = null;
       if (moved > 14) return;
-      var q = tracePoint(ev);
-      tr.points.push({ x: q[0], y: q[1], label: tr.sign });
+      var q = tracePoint(ev), mine = tr;
       buzz(10);
-      drawTrace();
-      runMask();
+      var hadHandle = !!tr.handle;
+      ensureHandle().then(function () {
+        if (tr !== mine) return;
+        // First tap on a region found by colour: start the AI from this tap
+        if (!hadHandle && !tr.points.length && !tr.sign) { traceHint("Tap the leaf first (+ Leaf), then remove background."); tr.busy = false; updateTraceButtons(); return; }
+        tr.points.push({ x: q[0], y: q[1], label: tr.sign });
+        drawTrace();
+        runMask();
+      }).catch(function (e) {
+        if (tr !== mine) return;
+        tr.busy = false; traceBusy(null);
+        tr.autoError = "Automatic leaf finding isn't available here (" + e.message + ").";
+        setTraceMode("draw");
+      });
       return;
     }
     if (!tr.cur) return;
@@ -1106,13 +1222,13 @@
     if (!tr) return;
     if (tr.mode === "auto") {
       for (var i = tr.points.length - 1; i >= 0; i--) if (!tr.points[i].auto) { tr.points.splice(i, 1); break; }
-      if (!tr.points.length) tr.points = [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }];
-      runMask();
+      if (!tr.points.length && tr.autoPoint) tr.points = [tr.autoPoint];
+      if (tr.points.length) runMask();
     } else { tr.polys.pop(); drawTrace(); updateTraceButtons(); }
   });
   $("trClear").addEventListener("click", function () {
     if (!tr) return;
-    if (tr.mode === "auto") { tr.points = [{ x: tr.W / 2, y: tr.H / 2, label: 1, auto: true }]; runMask(); }
+    if (tr.mode === "auto") { tr.points = tr.autoPoint ? [tr.autoPoint] : []; if (tr.points.length) runMask(); }
     else { tr.polys = []; drawTrace(); updateTraceButtons(); }
   });
   $("trCancel").addEventListener("click", function () { closeTracer(null); });
@@ -1121,6 +1237,8 @@
     if (tr.mode === "auto") {
       if (!tr.roi) return;
       var tapped = tr.points.some(function (p) { return !p.auto; });
+      // Nothing changed: keep the earlier result (including per-leaf scores)
+      if (!tapped && tr.prev && tr.prev.roi && tr.prev.method !== "traced") return closeTracer(null);
       var pts = tr.points.map(function (p) { return { x: p.x, y: p.y, label: p.label, auto: p.auto }; });
       return closeTracer({ roi: tr.roi, method: tapped ? "auto + taps" : "auto", points: pts });
     }
@@ -1142,19 +1260,6 @@
     closeTracer({ roi: roi, method: "traced", points: null });
   });
   document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
-
-  function setBgMode(mode) {
-    settings.bgMode = mode === "field" ? "field" : "board";
-    Settings.save(settings);
-    document.querySelectorAll("#bgMode button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.bg === settings.bgMode)); });
-    var field = settings.bgMode === "field";
-    $("captureTitle").textContent = field ? "Photograph the leaf, then outline it" : "Photograph one leaf on the black board";
-    $("tipsBoard").hidden = field;
-    $("tipsField").hidden = !field;
-  }
-  document.querySelectorAll("#bgMode button").forEach(function (b) {
-    b.addEventListener("click", function () { setBgMode(b.dataset.bg); });
-  });
 
   // ---------- edit a saved record ----------
   function showEditForm(sheet, rec) {
@@ -1590,7 +1695,7 @@
   }
 
   // ---------- start ----------
-  setBgMode(settings.bgMode);
+  $("rules-" + (settings.rules === "r1" ? "r1" : "v2")).checked = true;
   fillPlotOptions();
   updateHeader();
   renderMethod();

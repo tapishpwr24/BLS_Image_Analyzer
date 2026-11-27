@@ -321,6 +321,10 @@ textarea { min-height: 70px; resize: vertical; }
 .add-sec { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px dashed var(--accent); color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; }
 .add-sec svg { width: 16px; height: 16px; }
 .add-sec.solid { border-style: solid; }
+.per-leaf { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.per-leaf .eyebrow { width: 100%; }
+.leaf-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 12px; background: var(--surface-2); font-size: 13px; font-weight: 600; }
+.leaf-chip .mini-score { width: 26px; height: 26px; font-size: 14px; border-radius: 8px; font-style: normal; }
 .noboard { display: grid; gap: 10px; background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px; font-size: 13px; }
 .noboard .btn { min-height: 42px; justify-self: start; background: var(--warn-ink); color: var(--warn-bg); }
 .field .hint.ok { color: var(--healthy); }
@@ -431,7 +435,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <div class="capture-top">
         <div>
           <div class="eyebrow">New leaf</div>
-          <h2 id="captureTitle">Photograph one leaf on the black board</h2>
+          <h2 id="captureTitle">Photograph the leaf. The app finds it.</h2>
         </div>
         <svg class="finder" viewBox="0 0 96 120" aria-hidden="true">
           <rect x="6" y="6" width="84" height="108" rx="8" fill="#050806"/>
@@ -442,10 +446,6 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
             <path d="M2 18V2h16M78 2h16v16M94 102v16H78M18 118H2v-16"/>
           </g>
         </svg>
-      </div>
-      <div class="bg-mode" role="group" aria-label="Photo background" id="bgMode">
-        <button type="button" data-bg="board" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" fill="currentColor" fill-opacity="0.25"/></svg>Black board</button>
-        <button type="button" data-bg="field" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3c-4 5-5 10-5 13 0 2.5 2.2 5 5 5s5-2.5 5-5c0-3-1-8-5-13z" stroke-dasharray="3 3"/></svg>Field photo</button>
       </div>
       <div class="capture-actions">
         <label class="btn btn-camera" for="camInput">
@@ -460,19 +460,14 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         <input id="fileInput" type="file" accept="image/jpeg,image/png" hidden>
       </div>
       <ul class="tips" id="tipsBoard">
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 6c-3 4-3.5 8-3.5 10 0 1.5 1.5 3 3.5 3s3.5-1.5 3.5-3c0-2-.5-6-3.5-10z"/></svg>Leaf flat on matte black</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 6c-3 4-3.5 8-3.5 10 0 1.5 1.5 3 3.5 3s3.5-1.5 3.5-3c0-2-.5-6-3.5-10z"/></svg>Black board or cloth works best</li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 18a5 5 0 1 1 1.5-9.8A6 6 0 0 1 20 11a4 4 0 0 1-1 7z"/></svg>Shade, no flash or glare</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Leaf fills the frame</li>
-      </ul>
-      <ul class="tips" id="tipsField" hidden>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Leaf large and in focus</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 18a5 5 0 1 1 1.5-9.8A6 6 0 0 1 20 11a4 4 0 0 1-1 7z"/></svg>Shade, no glare</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>Leaf in the centre; the app finds its edges</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Leaf in the middle, filling the frame</li>
       </ul>
       <button class="sample-link" id="sampleBtn" type="button">Try it with the example leaf</button>
     </div>
 
-    <div class="card busy" id="busy" hidden><div class="spinner"></div><div><b>Reading the leaf…</b><div class="small muted">Classifying every pixel on this phone</div></div></div>
+    <div class="card busy" id="busy" hidden><div class="spinner"></div><div><b id="busyTitle">Finding the leaf…</b><div class="small muted" id="busyText">Separating the leaf from the background</div></div></div>
 
     <div class="card error-card" id="errorCard" hidden>
       <h3>No leaf found</h3>
@@ -511,6 +506,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <span><b>No black background found.</b> If soil or other plants are in the photo, they are being counted as leaf. Let the app find the leaf to score only the leaf.</span>
           <button class="btn" type="button" data-outline>Find the leaf</button>
         </div>
+        <div class="per-leaf" id="perLeaf" hidden></div>
         <div class="comp">
           <div class="comp-bar" id="compBar"></div>
           <div class="comp-legend" id="compLegend"></div>
@@ -520,6 +516,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <div class="scale-ticks" id="scaleTicks"></div>
           <div class="small muted">Diseased area (%) up to which each score applies</div>
         </div>
+        <div class="small muted" id="methodNote"></div>
       </div>
 
       <div class="card viewer">
@@ -661,6 +658,15 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     </div>
 
     <div class="card">
+      <h3>Scoring rules</h3>
+      <div class="dest-list">
+        <label class="dest"><input type="radio" name="rules" value="v2" id="rules-v2"><span><b>Calibrated v2 (recommended)</b><span class="small">Tuned on real phone photos: green = healthy, yellow = chlorotic, tan / brown / straw = necrotic.</span></span></label>
+        <label class="dest"><input type="radio" name="rules" value="r1" id="rules-r1"><span><b>R script v1.0</b><span class="small">Reproduces BLS_Image_Analyzer.R exactly (published results). It never detects chlorosis and is only reliable on photos cropped to the leaf.</span></span></label>
+      </div>
+      <p class="small muted" style="margin:0">Applies to new photos. Each record stores which rules were used.</p>
+    </div>
+
+    <div class="card">
       <h3>Plot list</h3>
       <p class="small muted" style="margin:0">Load your field book as a CSV with a plot column, and optionally genotype, rep and trial. Plot IDs then autocomplete, genotype and rep fill in by themselves, and Records shows which plots are still to do.</p>
       <div class="small" id="plotListInfo"></div>
@@ -701,7 +707,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 
     <details class="card method">
       <summary>Scoring method</summary>
-      <p class="small muted" style="margin:0">Same pixel rules as <span class="num">BLS_Image_Analyzer.R</span> v<span id="engVer"></span>, checked against the R output for the three example images. Photos are analysed at up to 2048 px on the long side.</p>
+      <p class="small muted" style="margin:0">Engine v<span id="engVer"></span>. The leaf is separated from the background automatically: by colour on a black board or cloth (several leaves at once), or by the on-phone AI leaf finder in field photos. Leaf pixels are then classified as healthy, chlorotic or necrotic, and the diseased share sets the 1–9 score. Photos are analysed at up to 2048 px on the long side.</p>
       <table><thead><tr><th>Score</th><th>Diseased area</th><th>Category</th></tr></thead><tbody id="scaleTable"></tbody></table>
     </details>
   </section>

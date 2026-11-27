@@ -8,7 +8,8 @@
  *   const seg = await import("./segment.js");
  *   await seg.load(progress => ...);          // first use downloads ~25 MB, then cached
  *   const handle = await seg.embed(imageData);
- *   const roi = await seg.mask(handle, [{x, y, label: 1}]);   // Uint8Array, 1 = leaf
+ *   const auto = await seg.autoMask(handle, imageData);     // no taps: picks the leaf itself
+ *   const fix  = await seg.mask(handle, [{x, y, label: 1}]); // with taps (1 = leaf, 0 = not leaf)
  */
 
 const BASE = new URL("./", import.meta.url);
@@ -116,8 +117,13 @@ export async function mask(h, points) {
   let best = 0;
   for (let i = 1; i < 3; i++) if (iou[i] > iou[best]) best = i;
   const logits = out.pred_masks.data.subarray(best * 256 * 256, (best + 1) * 256 * 256);
+  const seeds = points.filter((p) => p.label === 1);
+  return { roi: finish(h, logits, seeds), score: iou[best] };
+}
 
-  // 256x256 low-res logits cover the padded 1024 square: bilinear upsample to the image
+// 256x256 low-res logits cover the padded 1024 square: bilinear upsample to the
+// image, keep the part connected to the leaf point(s), fill lesion holes
+function finish(h, logits, seeds) {
   const W = h.W, H = h.H, s = h.k / 4;
   const m = new Uint8Array(W * H);
   for (let y = 0; y < H; y++) {
@@ -131,9 +137,98 @@ export async function mask(h, points) {
       if (v > 0) m[y * W + x] = 1;
     }
   }
-  const seeds = points.filter((p) => p.label === 1);
-  const kept = keepConnected(m, W, H, seeds);
-  return { roi: fillHoles(kept, W, H), score: iou[best] };
+  return fillHoles(keepConnected(m, W, H, seeds), W, H);
+}
+
+/*
+ * Fully automatic: try a 5x5 grid of starting points over the middle of the
+ * photo (only those on plant-coloured pixels), in ONE batched decoder run,
+ * and keep the most leaf-like mask: long and narrow, plant-coloured, near the
+ * centre, confident, and neither tiny nor most of the photo.
+ */
+export async function autoMask(h, imageData) {
+  const gw = Math.max(1, Math.round(h.W * h.k / 4)), gh = Math.max(1, Math.round(h.H * h.k / 4));
+  const src = document.createElement("canvas");
+  src.width = imageData.width; src.height = imageData.height;
+  src.getContext("2d").putImageData(imageData, 0, 0);
+  const c = document.createElement("canvas");
+  c.width = gw; c.height = gh;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(src, 0, 0, gw, gh);
+  const px = cx.getImageData(0, 0, gw, gh).data;
+  const plant = new Uint8Array(gw * gh);
+  for (let i = 0, p = 0; i < plant.length; i++, p += 4) {
+    const r = px[p] / 255, g = px[p + 1] / 255, b = px[p + 2] / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, sat = max ? d / max : 0;
+    let hue = 0;
+    if (d > 0) { hue = max === r ? (g - b) / d : max === g ? 2 + (b - r) / d : 4 + (r - g) / d; hue /= 6; if (hue < 0) hue += 1; }
+    plant[i] = max > 0.2 && sat > 0.2 && (hue < 0.5 || hue > 0.95) ? 1 : 0;
+  }
+  const pts = [];
+  for (let gy = 0.3; gy <= 0.701; gy += 0.1) {
+    for (let gx = 0.3; gx <= 0.701; gx += 0.1) {
+      if (plant[Math.floor(gy * gh) * gw + Math.floor(gx * gw)]) pts.push({ x: gx * h.W, y: gy * h.H });
+    }
+  }
+  if (!pts.length) pts.push({ x: h.W / 2, y: h.H / 2 });
+  const B = pts.length;
+  const coords = new Float32Array(B * 2);
+  pts.forEach((p, i) => { coords[2 * i] = p.x * h.k; coords[2 * i + 1] = p.y * h.k; });
+  const out = await sessions.dec.run({
+    input_points: new ort.Tensor("float32", coords, [1, B, 1, 2]),
+    input_labels: new ort.Tensor("int64", new BigInt64Array(B).fill(1n), [1, B, 1]),
+    image_embeddings: h.emb,
+    image_positional_embeddings: h.pos
+  });
+  const iou = out.iou_scores.data, masks = out.pred_masks.data;
+  let best = { score: -1 };
+  for (let b = 0; b < B; b++) {
+    for (let k = 0; k < 3; k++) {
+      const off = (b * 3 + k) * 256 * 256;
+      const sc = leafiness(masks, off, gw, gh, plant, iou[b * 3 + k]);
+      if (sc > best.score) best = { score: sc, off, point: pts[b], iou: iou[b * 3 + k] };
+    }
+  }
+  if (best.score < 0) return null;   // nothing leaf-like found
+  const logits = masks.subarray(best.off, best.off + 256 * 256);
+  return { roi: finish(h, logits, [best.point]), score: best.iou, point: { x: best.point.x, y: best.point.y, label: 1, auto: true } };
+}
+
+function leafiness(masks, off, gw, gh, plant, iou) {
+  const n = gw * gh, lo = new Uint8Array(n);
+  let area = 0;
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (masks[off + y * 256 + x] > 0) { lo[y * gw + x] = 1; area++; }
+  const fa = area / n;
+  if (fa < 0.01 || fa > 0.6) return -1;
+  // largest connected part
+  const ids = new Int32Array(n), stack = new Int32Array(n);
+  let bestId = 0, bestSize = 0, id = 0;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!lo[s0] || ids[s0]) continue;
+    id++; let sp = 0, size = 0; stack[sp++] = s0; ids[s0] = id;
+    while (sp) {
+      const i = stack[--sp], x = i % gw; size++;
+      if (x > 0 && lo[i - 1] && !ids[i - 1]) { ids[i - 1] = id; stack[sp++] = i - 1; }
+      if (x < gw - 1 && lo[i + 1] && !ids[i + 1]) { ids[i + 1] = id; stack[sp++] = i + 1; }
+      if (i >= gw && lo[i - gw] && !ids[i - gw]) { ids[i - gw] = id; stack[sp++] = i - gw; }
+      if (i < n - gw && lo[i + gw] && !ids[i + gw]) { ids[i + gw] = id; stack[sp++] = i + gw; }
+    }
+    if (size > bestSize) { bestSize = size; bestId = id; }
+  }
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, pl = 0;
+  for (let i = 0; i < n; i++) {
+    if (ids[i] !== bestId) continue;
+    const x = i % gw, y = (i - x) / gw;
+    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; pl += plant[i];
+  }
+  const N = bestSize, mx = sx / N, my = sy / N;
+  const cxx = sxx / N - mx * mx, cyy = syy / N - my * my, cxy = sxy / N - mx * my;
+  const tr = cxx + cyy, det = cxx * cyy - cxy * cxy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+  const l1 = tr / 2 + disc, l2 = Math.max(1e-6, tr / 2 - disc);
+  const elong = Math.sqrt(l1 / l2);
+  const plantFrac = pl / N;
+  const cent = 1 - Math.min(1, 2 * Math.hypot(mx / gw - 0.5, my / gh - 0.5));
+  return iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5);
 }
 
 // Keep only the regions touching a leaf point (drops stray neighbouring leaves)

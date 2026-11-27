@@ -40,7 +40,7 @@ function readCsv(file) {
       const ctx = c.getContext("2d");
       ctx.drawImage(bmp, 0, 0);
       const d = ctx.getImageData(0, 0, bmp.width, bmp.height);
-      const res = BLSEngine.analyze(d.data, d.width, d.height);
+      const res = BLSEngine.analyze(d.data, d.width, d.height, undefined, undefined, "r1");
       delete res.mask;
       return res;
     }, b64);

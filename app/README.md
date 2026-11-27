@@ -15,7 +15,15 @@ saved on the phone and copied to storage the user chooses.
 ## Features
 
 - **Score a leaf** from a camera or gallery photo: BLS score 1–9, diseased leaf area, category, and a colour overlay to check the classification.
-- **Field photos (no black board):** switch the capture screen to *Field photo*. After each photo the app **finds the leaf edges automatically** with SlimSAM, a compact Segment Anything model that runs on the phone, offline, in about 2–6 s. Only the leaf is scored; soil and other plants are ignored. If it gets part of the outline wrong, tap a missed part (*+ Leaf*) or the background (*− Not leaf*). Each tap takes well under a second. *Draw by hand* is the fallback. In *Black board* mode the app warns when a photo has no black background and offers *Find the leaf*. The `Segmentation` column records the method (`auto`, `auto + taps`, `traced`, `black board`). Black-board photos remain the most reliable and match the R pipeline.
+- **Automatic leaf detection, any background.** Every photo is checked automatically:
+  - *Black board or cloth*: leaves are separated by colour (dark-grey board, texture, dust, labels and tape are ignored). Several leaves in one photo are each scored, with an overall score.
+  - *Field photos* (soil, other plants, a hand): the on-phone AI leaf finder (SlimSAM) tries several starting points in the middle of the photo and keeps the most leaf-like result.
+  - *Photos already cropped to the leaf*: the whole photo is scored.
+  - *Adjust leaf edges* lets you correct it: tap a missed part (*+ Leaf*) or background (*− Not leaf*), or draw by hand. The `Segmentation` column records the method (`board`, `auto`, `auto + taps`, `traced`, `whole photo`).
+- **Scoring rules** (Settings):
+  - *Calibrated v2* (default) is tuned on real phone photos. Hue on the correct brightness scale: green (≥ 68°) is healthy; yellow (48–68°, saturation ≥ 0.30) is chlorotic; tan, brown, straw or very dark (< 48°) is necrotic.
+  - *R script v1.0* reproduces `BLS_Image_Analyzer.R` exactly. It never detects chlorosis (the `rgb2hsv` scaling bug, see below) and needs photos cropped to the leaf.
+  - Each record stores the rules used (`Rules` column), plus `Leaf_Count`, `Per_Leaf_Diseased_Percent` and `Per_Leaf_BLS_Score`.
 - **Long leaves:** tap *Add section* to photograph the rest of the leaf. Pixel counts from all sections are added up, so the score covers the whole leaf (`Sections` column).
 - **Plot list:** load your field book (a CSV with a `plot` column, plus optional genotype/entry, rep and trial). Plot IDs then autocomplete, genotype and rep fill in, the app warns about unknown or already-scored plots, offers *Next plot in list* after saving, and shows *Plots scored 34 / 120* with the list still to do.
 - **Edit a saved record** (plot, genotype, rep, leaf, trial, rater, notes). The score comes from the photo and can't be edited. Edits are re-synced, with `Edited_At` set and webhook event `update`.
