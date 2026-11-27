@@ -1,0 +1,133 @@
+{
+ "date": "2026-11-27",
+ "source": "OpenAlex",
+ "searches": [
+  {
+   "name": "Q1 severity segmentation (recent)",
+   "query": "plant disease severity estimation deep learning segmentation",
+   "since": "2023-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q2 wheat severity DL (recent)",
+   "query": "wheat leaf disease severity deep learning",
+   "since": "2023-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q3 BLS wheat barley",
+   "query": "bacterial leaf streak wheat barley Xanthomonas translucens",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "Q4 smartphone severity app",
+   "query": "smartphone application plant disease severity estimation image",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "Q5 SAM foundation agriculture",
+   "query": "segment anything model plant leaf disease segmentation",
+   "since": "2023-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q6 few-shot semi-supervised lesion",
+   "query": "semi-supervised few-shot plant disease lesion segmentation",
+   "since": "2023-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "S1 seminal DL plant disease",
+   "query": "deep learning plant disease detection images",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "S2 seminal severity image analysis",
+   "query": "plant disease severity image analysis visual estimation accuracy",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "X1 medical lesion area segmentation",
+   "query": "skin lesion wound area segmentation smartphone deep learning",
+   "since": "2022-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "X2 ordinal severity grading",
+   "query": "ordinal regression disease severity grading deep learning",
+   "since": "2022-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "X3 weak supervision segmentation",
+   "query": "weakly supervised semantic segmentation image-level labels class activation",
+   "since": "2022-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q7 septoria automated image analysis",
+   "query": "Septoria tritici blotch automated image analysis leaf lesions",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "Q8 wheat in-field foliar quantification",
+   "query": "in-field detection quantification wheat foliar diseases deep learning",
+   "since": "2020-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q9 wheat rust severity segmentation",
+   "query": "wheat rust severity segmentation leaf images deep learning",
+   "since": "2021-01-01",
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q10 BLS image deep learning",
+   "query": "bacterial leaf streak image deep learning severity",
+   "since": null,
+   "sort": "relevance_score:desc",
+   "n": 25
+  },
+  {
+   "name": "Q11 bacterial leaf streak barley wheat severity rating",
+   "query": "bacterial leaf streak severity rating scale wheat",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "Q12 severity visual estimation review",
+   "query": "disease severity estimated visually digital photography image analysis",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  },
+  {
+   "name": "Q13 standard area diagram",
+   "query": "standard area diagrams severity estimation validation",
+   "since": null,
+   "sort": "cited_by_count:desc",
+   "n": 25
+  }
+ ],
+ "unique_papers": 407
+}
