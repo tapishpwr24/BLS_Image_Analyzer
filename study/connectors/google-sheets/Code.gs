@@ -20,7 +20,8 @@
  * Sending the same Record_ID twice updates the row instead of adding a duplicate.
  * From app 0.10, a "Photo" column shows a thumbnail of each leaf inside the Sheet,
  * and Study mode adds Visual_Diseased_Percent, Rating_Mode (blind / after),
- * Rating_Seconds, Rated_At and Set_Position. Updating an existing deployment:
+ * Rating_Seconds, Rated_At and Set_Position. A "Users" tab lists everyone who
+ * uses the app (name, phone, first and last use, times opened). Updating an existing deployment:
  * paste this file again, then Deploy → Manage deployments → Edit → Version: New.
  */
 
@@ -29,6 +30,46 @@ var SHEET_NAME = "BLS_results";
 var FOLDER_NAME = "BLS Leaf Scorer photos";
 var THUMB_COL = "Photo";          // in-cell thumbnail of the leaf (added by app 0.10+)
 var THUMB_ROW_HEIGHT = 90;        // px; set to 0 to keep normal row height
+var USERS_SHEET = "Users";        // who uses the app: one row per person and phone
+var USER_COLS = ["Rater", "Device_ID", "First_Seen", "Last_Seen", "Times_Opened", "App_Version", "Device", "Trial"];
+
+// The app says hello when someone starts it or changes the name. Keeps one row
+// per person + phone, so the organiser sees how many people use the app.
+function hello(ss, u) {
+  var name = String(u.Rater || "").trim();
+  if (!name) return { ok: false, error: "No name" };
+  var sh = ss.getSheetByName(USERS_SHEET) || ss.insertSheet(USERS_SHEET);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(USER_COLS);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, USER_COLS.length).setFontWeight("bold");
+  }
+  var now = new Date();
+  var n = sh.getLastRow() - 1;
+  var data = n > 0 ? sh.getRange(2, 1, n, USER_COLS.length).getValues() : [];
+  var at = -1;
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === name.toLowerCase() && String(data[i][1]) === String(u.Device_ID || "")) { at = i; break; }
+  }
+  if (at >= 0) {
+    sh.getRange(at + 2, 4, 1, 5).setValues([[now, (Number(data[at][4]) || 0) + 1, u.App_Version || "", u.Device || "", u.Trial || ""]]);
+  } else {
+    sh.appendRow([name, u.Device_ID || "", now, now, 1, u.App_Version || "", u.Device || "", u.Trial || ""]);
+  }
+  return { ok: true, users: countUsers(ss) };
+}
+
+// Number of different people (names) in the Users tab
+function countUsers(ss) {
+  var sh = ss.getSheetByName(USERS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var seen = {};
+  sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach(function (r) {
+    var k = String(r[0]).trim().toLowerCase();
+    if (k) seen[k] = 1;
+  });
+  return Object.keys(seen).length;
+}
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
@@ -38,7 +79,8 @@ function doPost(e) {
     if (TEAM_KEY && body.key !== TEAM_KEY) return reply({ ok: false, error: "Wrong team key" });
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (body.action === "ping") return reply({ ok: true, sheet: ss.getName() });
+    if (body.action === "ping") return reply({ ok: true, sheet: ss.getName(), users: countUsers(ss) });
+    if (body.action === "hello") return reply(hello(ss, body.user || {}));
     if (body.action !== "append") return reply({ ok: false, error: "Unknown action" });
 
     var columns = body.columns;

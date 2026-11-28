@@ -288,6 +288,16 @@ textarea { min-height: 70px; resize: vertical; }
 .cmp-card .cmp b { font: 700 26px var(--font-display); }
 .cmp-card .cmp-note { grid-column: 1 / -1; }
 .ruler.locked button { cursor: default; }
+.welcome { position: fixed; inset: 0; z-index: 80; background: #0c1610; display: grid; place-items: center; padding: 24px 16px; overflow: auto; }
+.welcome-card { width: min(420px, 100%); display: grid; gap: 12px; color: var(--board-ink); }
+.welcome-card h2 { margin: 0; color: #fff; font: 800 30px/1.1 var(--font-display); }
+.welcome-logo { width: 56px; height: 56px; border-radius: 14px; }
+.welcome-text { margin: 0; font-size: 15px; color: var(--board-ink-2); }
+.welcome-note { margin: 4px 0 0; font-size: 12.5px; color: var(--board-ink-2); }
+.welcome-card .btn { min-height: 54px; font-size: 17px; }
+.user-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.rater-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 14px; }
+#rIdRow.one { grid-template-columns: 1fr; }
 #rateFrame { max-height: 70vh; }
 #rateFrame.tall canvas { height: min(560px, 66vh); }
 #rateFrame.rot canvas { height: min(300px, 40vh); }
@@ -435,7 +445,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 <header class="topbar">
   <div class="topbar-inner">
     <img class="logo" src="icons/icon-192.png" alt="">
-    <h1 class="brand"><b>BLS Leaf Scorer · Study test</b><span id="trialLabel">No trial set</span></h1>
+    <h1 class="brand"><b>BLS Leaf Scorer · Study test</b><span><button class="user-btn" type="button" id="userBtn" aria-label="Switch user"></button> · <span id="trialLabel">No trial set</span></span></h1>
     <button class="sync-pill" id="syncPill" type="button" data-state="ok" aria-label="Sync status">
       <span class="dot"></span><span id="syncText">This phone</span>
     </button>
@@ -466,7 +476,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <div class="capture-top">
         <div>
           <div class="eyebrow">New leaf</div>
-          <h2 id="captureTitle">Photograph the leaf. The app finds it.</h2>
+          <h2 id="captureTitle">Photograph the leaf. Rate it, then see the app's score.</h2>
         </div>
         <svg class="finder" viewBox="0 0 96 120" aria-hidden="true">
           <rect x="6" y="6" width="84" height="108" rx="8" fill="#050806"/>
@@ -531,8 +541,12 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </div>
         <div class="leaf-frame" id="rateFrame"><canvas id="rateCanvas" aria-label="Original photo"></canvas></div>
         <p class="small muted" style="margin:0">Scroll the photo to see all of the leaf. The app scores it only after you lock your rating.</p>
-        <div class="row2">
-          <div class="field"><label for="rRater">Rater ID</label><input id="rRater" type="text" placeholder="e.g. R01 or your initials" autocomplete="off"></div>
+        <div class="rater-line" id="rRaterChip" hidden>
+          <span>Rater <b id="rRaterName"></b></span>
+          <button class="link-btn" type="button" id="rRaterChange">Change rater</button>
+        </div>
+        <div class="row2" id="rIdRow">
+          <div class="field" id="rRaterField"><label for="rRater">Rater ID <span class="muted" style="font-weight:400">(asked once)</span></label><input id="rRater" type="text" placeholder="e.g. R01 or your initials" autocomplete="off"></div>
           <div class="field"><label for="rPlot">Plant / image ID</label><input id="rPlot" type="text" placeholder="e.g. P-1042" list="plotOptions" autocomplete="off"></div>
         </div>
         <div class="field"><span class="label" id="rLbl">BLS score, 1–9</span>
@@ -722,29 +736,30 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <h3>Defaults</h3>
       <div class="row2">
         <div class="field"><label for="dTrial">Trial</label><input id="dTrial" type="text" placeholder="e.g. BLS-2026-Ames"></div>
-        <div class="field"><label for="dRater">Rater</label><input id="dRater" type="text" placeholder="Your name"></div>
+        <div class="field"><label for="dRater">Rater (you)</label><input id="dRater" type="text" placeholder="Your name"></div>
       </div>
+      <p class="small muted" style="margin:0" id="teamUsers"></p>
       <label class="check"><input id="dPhotos" type="checkbox" checked> Upload photos and overlays (uses more data)</label>
       <button class="btn btn-soft" type="button" id="saveDefaults">Save defaults</button>
     </div>
 
     <div class="card">
-      <h3>Study mode (rater evaluation)</h3>
-      <label class="check"><input id="dBlind" type="checkbox" checked> Rate each leaf by eye <b>before</b> the app shows its score</label>
+      <h3>Rating mode</h3>
+      <p class="small" style="margin:0">Every leaf is rated by eye first. The app shows its score only after the rating is locked.</p>
       <label class="check"><input id="dShuffle" type="checkbox" checked> Show a set of photos in random order</label>
-      <p class="small muted" style="margin:0">Each record keeps the rater ID, the rater's 1–9 score and %, how long the rating took, and the app's score, so rater and app can be compared later. These settings are shared with your team through the setup link.</p>
-      <button class="btn btn-soft" type="button" id="saveStudy">Save study settings</button>
+      <p class="small muted" style="margin:0">Each record keeps the rater ID, the rater's 1–9 score and %, how long the rating took, and the app's score, so rater and app can be compared later. This setting is shared with your team through the setup link.</p>
+      <button class="btn btn-soft" type="button" id="saveStudy">Save</button>
     </div>
 
     <div class="card">
       <h3>Scoring rules</h3>
       <div class="dest-list">
         <label class="dest"><input type="radio" name="rules" value="v2" id="rules-v2"><span><b>Calibrated v2 (recommended)</b><span class="small">Tuned on real phone photos: green = healthy, yellow = chlorotic, tan / brown / straw = necrotic.</span></span></label>
-        <label class="dest" id="rulesTaughtRow"><input type="radio" name="rules" value="taught" id="rules-taught"><span><b>Taught colours</b><span class="small" id="taughtInfo">Not taught yet. Under any result, tap Teach colours and brush examples of healthy, chlorotic and necrotic tissue.</span></span></label>
+        <label class="dest" id="rulesTaughtRow" hidden style="display:none"><input type="radio" name="rules" value="taught" id="rules-taught"><span><b>Taught colours</b><span class="small" id="taughtInfo">Not taught yet. Under any result, tap Teach colours and brush examples of healthy, chlorotic and necrotic tissue.</span></span></label>
         <label class="dest"><input type="radio" name="rules" value="r1" id="rules-r1"><span><b>R script v1.0</b><span class="small">Reproduces BLS_Image_Analyzer.R exactly (published results). It never detects chlorosis and is only reliable on photos cropped to the leaf.</span></span></label>
       </div>
-      <p class="small muted" style="margin:0">Applies to new photos. Each record stores which rules were used. Taught colours are shared with your team through the setup link.</p>
-      <button class="btn btn-ghost" type="button" id="resetTaught" hidden>Forget taught colours</button>
+      <p class="small muted" style="margin:0">Applies to new photos. Each record stores which rules were used.</p>
+      <button class="btn btn-ghost" type="button" id="resetTaught" hidden style="display:none">Forget taught colours</button>
     </div>
 
     <div class="card">
@@ -855,6 +870,20 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     <button class="btn btn-ghost" type="button" id="tcClear">Clear</button>
     <button class="btn btn-use" type="button" id="tcSave" disabled>Use these colours</button>
   </div>
+</div>
+
+<div class="welcome" id="welcome" hidden role="dialog" aria-modal="true" aria-labelledby="wTitle">
+  <form class="welcome-card" id="wForm" autocomplete="off">
+    <img class="welcome-logo" src="icons/icon-192.png" alt="">
+    <div class="eyebrow" style="color:var(--board-ink-2)">BLS Leaf Scorer · Rating</div>
+    <h2 id="wTitle">Welcome</h2>
+    <p class="welcome-text">Enter your name or rater ID to start. It is saved with every leaf you rate.</p>
+    <label class="label" for="wName" style="color:var(--board-ink)">Your name or rater ID</label>
+    <input id="wName" class="input-lg" type="text" placeholder="e.g. Priya S. or R01" enterkeyhint="go" autocapitalize="words">
+    <span class="status-line err" id="wErr" role="alert"></span>
+    <button class="btn btn-primary" type="submit" id="wStart">Start</button>
+    <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
+  </form>
 </div>
 
 <div class="toast" id="toast" role="status" hidden></div>

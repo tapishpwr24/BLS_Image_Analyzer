@@ -28,7 +28,8 @@
     "Per_Leaf_Diseased_Percent", "Per_Leaf_BLS_Score",
     "Lesion_Count", "Mean_Lesion_Size_Percent", "Visual_BLS_Score",
     // Study mode: the rater's own estimate, made before the app's score was shown
-    "Visual_Diseased_Percent", "Rating_Mode", "Rating_Seconds", "Rated_At", "Set_Position"
+    "Visual_Diseased_Percent", "Rating_Mode", "Rating_Seconds", "Rated_At", "Set_Position",
+    "Device_ID"
   ];
 
   function postJson(url, body, headers, plain) {
@@ -79,7 +80,8 @@
           var url = requireUrl(cfg, "url");
           return postJson(url, { action: "ping", key: cfg.key || "" }, null, true);
         }).then(function (d) {
-          return "Connected to “" + (d.sheet || "your Sheet") + "”.";
+          return "Connected to “" + (d.sheet || "your Sheet") + "”." +
+            (d.users != null ? " " + d.users + (d.users === 1 ? " person uses" : " people use") + " the app (Users tab)." : "");
         });
       },
       send: function (payload, cfg) {
@@ -88,6 +90,11 @@
           action: "append", key: cfg.key || "", columns: COLUMNS,
           row: payload.row, photo: payload.photo, overlay: payload.overlay, thumb: payload.thumb
         }, null, true);
+      },
+      // Who uses the app: one row per person and phone in the Sheet's "Users" tab
+      hello: function (user, cfg) {
+        var url = requireUrl(cfg, "url");
+        return postJson(url, { action: "hello", key: cfg.key || "", user: user }, null, true);
       }
     },
     {

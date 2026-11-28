@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.10.0";
+  var APP_VERSION = "0.10.2";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -276,7 +276,9 @@
 
   function askRating(data, name) {
     drawPhoto($("rateCanvas"), $("rateFrame"), data);
-    $("rRater").value = $("fRater").value.trim() || settings.rater || "";
+    // The rater ID is asked once; after that it is shown, not asked again
+    $("rRater").value = settings.rater || $("fRater").value.trim() || "";
+    showRaterField(!$("rRater").value);
     $("rPlot").value = batch.active ? stem(name) : $("fPlot").value.trim();
     setRate(null);
     $("rPct").value = ""; $("rPctRange").value = 0;
@@ -287,6 +289,14 @@
     rateStarted = Date.now();
     return new Promise(function (res) { rateResolve = res; });
   }
+
+  function showRaterField(ask) {
+    $("rRaterField").hidden = !ask;
+    $("rRaterChip").hidden = ask;
+    $("rIdRow").classList.toggle("one", !ask);
+    $("rRaterName").textContent = $("rRater").value;
+  }
+  $("rRaterChange").addEventListener("click", function () { openWelcome(true); });
 
   $("rateLock").addEventListener("click", function () {
     var rater = $("rRater").value.trim(), plot = $("rPlot").value.trim();
@@ -428,7 +438,6 @@
     html += '<button class="add-sec solid" type="button" data-outline>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
       "Adjust leaf edges" + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
-    html += '<button class="add-sec solid" type="button" data-teach><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 20c2-1 3-3 5-5l8-8a2 2 0 0 1 3 3l-8 8c-2 2-4 3-5 5z"/></svg>Teach colours</button>';
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
@@ -650,7 +659,8 @@
       ratingMode: pendingRating ? "blind" : (visualScore ? "after app score" : ""),
       rateSeconds: pendingRating ? pendingRating.seconds : "",
       ratedAt: pendingRating ? pendingRating.ratedAt : "",
-      setPosition: pendingRating ? pendingRating.position : (batch.active ? batch.pos + "/" + batch.total : "")
+      setPosition: pendingRating ? pendingRating.position : (batch.active ? batch.pos + "/" + batch.total : ""),
+      deviceId: settings.deviceId || ""
     };
     if (pendingRating && !meta.rater) meta.rater = pendingRating.rater;
     // Remember trial and rater for the next leaf
@@ -735,7 +745,8 @@
       Visual_BLS_Score: m.visualScore || "",
       Visual_Diseased_Percent: m.visualPct === 0 ? 0 : (m.visualPct || ""),
       Rating_Mode: m.ratingMode || (m.visualScore ? "after app score" : ""),
-      Rating_Seconds: m.rateSeconds || "", Rated_At: m.ratedAt || "", Set_Position: m.setPosition || ""
+      Rating_Seconds: m.rateSeconds || "", Rated_At: m.ratedAt || "", Set_Position: m.setPosition || "",
+      Device_ID: m.deviceId || ""
     };
   }
 
@@ -828,6 +839,71 @@
 
   function updateHeader() {
     $("trialLabel").textContent = settings.trial ? "Trial · " + settings.trial : "No trial set";
+    $("userBtn").textContent = settings.rater || "Sign in";
+  }
+
+  // ---------- who is using the app ----------
+  // Asked once before the app starts; switch from the name in the top bar.
+  function openWelcome(switching) {
+    $("wTitle").textContent = switching ? "Who is rating now?" : "Welcome";
+    $("wName").value = switching ? "" : (settings.rater || "");
+    $("wErr").textContent = "";
+    $("welcome").hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(function () { try { $("wName").focus(); } catch (e) { /* ignore */ } }, 60);
+  }
+  function startAs(name) {
+    var changed = name !== settings.rater;
+    settings.rater = name;
+    if (!settings.deviceId) settings.deviceId = uid();
+    Settings.save(settings);
+    $("fRater").value = name;
+    $("rRater").value = name;
+    if (!$("rate").hidden) showRaterField(false);
+    $("dRater").value = name;
+    updateHeader(); updateContext(); renderQr();
+    $("welcome").hidden = true;
+    document.body.style.overflow = "";
+    if (changed) toast("Rating as " + name);
+    registerUser();
+  }
+  $("wForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var name = $("wName").value.trim().replace(/\s+/g, " ");
+    if (name.length < 2) { $("wErr").textContent = "Enter your name or rater ID (at least 2 characters)."; buzz(40); return; }
+    startAs(name.slice(0, 60));
+  });
+  $("userBtn").addEventListener("click", function () { openWelcome(true); });
+
+  function deviceName() {
+    var ua = navigator.userAgent || "";
+    var os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "Mac" : "Other";
+    var br = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "";
+    return os + (br ? " · " + br : "");
+  }
+  // Tells the team's storage (Google Sheet "Users" tab) who uses the app, so
+  // the organiser can see how many people are rating. No storage set up: nothing is sent.
+  function registerUser() {
+    if (!settings.rater || settings.destination === "local" || navigator.onLine === false) return Promise.resolve();
+    var conn = C.get(settings.destination);
+    if (!conn.hello) return Promise.resolve();
+    if (!settings.deviceId) { settings.deviceId = uid(); Settings.save(settings); }
+    return conn.hello({ Rater: settings.rater, Device_ID: settings.deviceId, App_Version: APP_VERSION, Device: deviceName(), Trial: settings.trial || "" },
+      settings.connectors[conn.id] || {}).then(function (d) {
+      if (d && d.users != null) { settings.teamUsers = d.users; settings.teamUsersAt = new Date().toISOString(); Settings.save(settings); }
+      renderTeamUsers();
+    }, function () { /* offline or not set up yet: try again next start */ });
+  }
+  function renderTeamUsers() {
+    var el = $("teamUsers");
+    if (settings.destination === "local") {
+      el.textContent = "To see who uses the app, connect a Google Sheet above. Each person's name, device and last use then appear in its Users tab.";
+    } else if (settings.teamUsers != null) {
+      el.textContent = settings.teamUsers + " " + (settings.teamUsers === 1 ? "person has" : "people have") + " used the app with your team's storage (checked " +
+        new Date(settings.teamUsersAt).toLocaleDateString() + "). Open the Users tab in the Sheet to see who.";
+    } else {
+      el.textContent = "Who uses the app is listed in the Users tab of your team's Sheet.";
+    }
   }
 
   // ---------- records view ----------
@@ -1018,8 +1094,8 @@
     $("dTrial").value = settings.trial || "";
     $("dRater").value = settings.rater || "";
     $("dPhotos").checked = !!settings.uploadPhotos;
-    $("dBlind").checked = !!settings.blind;
     $("dShuffle").checked = !!settings.shuffle;
+    renderTeamUsers();
     $("destStatus").textContent = "";
     renderPlotSettings();
     renderQr();
@@ -1067,6 +1143,7 @@
     renderQr();
     status("✓ Saved. New records go to " + C.get(pickedDest).name + ".", true);
     refreshPending().then(syncPending);
+    registerUser(); renderTeamUsers();
   });
 
   document.querySelectorAll('input[name="rules"]').forEach(function (r) {
@@ -1086,9 +1163,13 @@
 
   $("saveDefaults").addEventListener("click", function () {
     settings.trial = $("dTrial").value.trim();
-    settings.rater = $("dRater").value.trim();
+    var newName = $("dRater").value.trim();
+    if (newName.length < 2) { toast("Your name or rater ID is needed"); $("dRater").value = settings.rater || ""; return; }
+    var renamed = newName !== settings.rater;
+    settings.rater = newName;
     settings.uploadPhotos = $("dPhotos").checked;
     Settings.save(settings);
+    if (renamed) registerUser();
     updateHeader();
     renderQr();
     // Carry new defaults into an open, unsaved form
@@ -1098,12 +1179,13 @@
     toast("Defaults saved");
   });
 
+  // Rating mode is always on in this app: rate first, then the app scores
+  settings.blind = true;
   $("saveStudy").addEventListener("click", function () {
-    settings.blind = $("dBlind").checked;
     settings.shuffle = $("dShuffle").checked;
     Settings.save(settings);
     renderQr(); updateStudyLine();
-    toast(settings.blind ? "Study mode on: raters score before seeing the app's score" : "Study mode off: the app's score shows first");
+    toast(settings.shuffle ? "Photo sets come in random order" : "Photo sets come in name order");
   });
   function updateStudyLine() {
     $("studyLineText").textContent = (settings.shuffle ? "Pick many photos; they come one by one in random order" : "Pick many photos; they come one by one in name order") +
@@ -1161,10 +1243,8 @@
       settings.connectors[conn.id] = cfg.c || {};
       if (cfg.t) settings.trial = cfg.t;
       if (typeof cfg.p === "boolean") settings.uploadPhotos = cfg.p;
-      if (typeof cfg.b === "boolean") settings.blind = cfg.b;
       if (typeof cfg.s === "boolean") settings.shuffle = cfg.s;
       updateStudyLine();
-      if (cfg.k) { try { settings.palette = unpackPalette(cfg.k); taughtModel = E.buildModel(settings.palette); if (cfg.r) settings.rules = cfg.r; } catch (e) { /* ignore a bad palette */ } }
       Settings.save(settings); updateHeader(); refreshPending(); card.remove();
       toast("Joined. Records now go to " + conn.name);
     });
@@ -1518,10 +1598,11 @@
   document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
 
   // ---------- taught colours (pliman / PlantCV style) ----------
-  var taughtModel = settings.palette ? E.buildModel(settings.palette) : null;
+  // Not offered in the rating app: scoring uses calibrated v2 (or the R script rules)
+  var taughtModel = null;
+  if (settings.rules === "taught") { settings.rules = "v2"; Settings.save(settings); }
   function currentRules() {
     if (settings.rules === "r1") return "r1";
-    if (settings.rules === "taught" && taughtModel) return taughtModel;
     return "v2";
   }
   // Compact form for the team link: only non-zero histogram bins
@@ -1773,7 +1854,7 @@
       '<span class="small muted">Compares the app\'s BLS score with the score your raters gave by eye (ρc = 1 is perfect). ' +
       (isFinite(a.r) ? "Precision r = " + a.r.toFixed(2) + ", accuracy Cb = " + a.cb.toFixed(2) + ". " : "") +
       "On average the app scores " + Math.abs(a.bias).toFixed(1) + " " + (a.bias >= 0 ? "higher" : "lower") + " than the raters." +
-      (ccc < 0.75 ? " Teaching the colours on a few of these leaves usually improves this." : "") + "</span>" + pctAgreement(list);
+      "</span>" + pctAgreement(list);
   }
   // Same check on diseased area (%), for raters who gave a % estimate
   function pctAgreement(list) {
@@ -2291,6 +2372,9 @@
   renderMethod();
   updateContext();
   checkSetupHash();
+  renderTeamUsers();
+  // Name first: the app starts once the person has said who they are
+  if (!settings.rater) openWelcome(false); else registerUser();
   showInstallCard();
   if (isInstalled()) protectStorage();
   refreshPending();
