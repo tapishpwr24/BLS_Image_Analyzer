@@ -258,11 +258,212 @@ function skinPoints(masks, off, gw, gh, skin, h) {
   return blobs.slice(0, 3).map((b) => ({ x: (b.x + 0.5) * 4 / h.k, y: (b.y + 0.5) * 4 / h.k, label: 0 }));
 }
 
+/*
+ * Field leaf finder ported from python/bls_analyzer/sam.py (segment_field), worked out on
+ * the decoder's 256 grid so it stays fast on a phone:
+ *   - hands = large skin-coloured regions entering from the photo edge (at most two);
+ *     each gets a "not leaf" point and is cut out of the final mask
+ *   - start points: leaf right next to the fingers (a held leaf), the solid leaf patch
+ *     nearest the centre, and a 5 x 5 grid over the photo that needs no colour
+ *     (dark, waxy or dead leaves); soil and clumps lose in the scoring
+ *   - each candidate scored as in Python: confident, long, wide enough to be the leaf held
+ *     close, not a sliver, reaching near the centre, mostly plant-coloured (>= 60%),
+ *     little skin, and a bonus when it touches the fingers
+ *   - a photo whose top third is more than 4% sky is a canopy or landscape shot: null
+ * Returns { roi, score, point, points } like autoMask, { sky: true }, or null.
+ * Tested on 30 BLS_SD field photos: 29 within 20% of the Python analyzer's leaf area
+ * (the earlier autoMask: 21), about 2 s on top of the image encoder on a laptop.
+ */
+export async function fieldMask(h, imageData) {
+  const W = h.W, H = h.H, px = imageData.data;
+  const gw = Math.max(1, Math.round(W * h.k / 4)), gh = Math.max(1, Math.round(H * h.k / 4)), n = gw * gh;
+  const sGrid = gh / H;   // grid cells per image pixel
+
+  // sky in the top third (full resolution, as in Python)
+  let sky = 0;
+  for (let y = 0; y < Math.floor(H / 3); y++) for (let x = 0; x < W; x++) {
+    const p = (y * W + x) * 4, r = px[p], g = px[p + 1], b = px[p + 2];
+    if (b > 140 && b > r + 25 && b >= g) sky++;
+  }
+  if (sky / (W * H) > 0.04) return { sky: true };   // canopy or landscape shot: no single leaf
+
+  // colour classes sampled at each grid cell's centre
+  const skin = new Uint8Array(n), leaf = new Uint8Array(n), plantT = new Uint8Array(n);
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+    const x = Math.min(W - 1, Math.floor((gx + 0.5) * W / gw)), y = Math.min(H - 1, Math.floor((gy + 0.5) * H / gh));
+    const p = (y * W + x) * 4, r = px[p], g = px[p + 1], b = px[p + 2], i = gy * gw + gx;
+    const Y = 0.299 * r + 0.587 * g + 0.114 * b, cr = 128 + 0.5 * r - 0.4187 * g - 0.0813 * b, cb = 128 - 0.1687 * r - 0.3313 * g + 0.5 * b;
+    const mxI = Math.max(r, g, b), mnI = Math.min(r, g, b);
+    skin[i] = r > 95 && g > 40 && b > 20 && r > g && r > b && r - g > 15 && mxI - mnI > 15 && cr >= 138 && cr <= 175 && cb >= 85 && cb <= 130 && Y > 60 ? 1 : 0;
+    const rf = r / 255, gf = g / 255, bf = b / 255, mx = mxI / 255, d = (mxI - mnI) / 255, sat = mx > 0 ? d / mx : 0;
+    let hue = 0;
+    if (d > 0) { hue = mx === rf ? (((gf - bf) / d) % 6 + 6) % 6 : mx === gf ? (bf - rf) / d + 2 : (rf - gf) / d + 4; hue /= 6; }
+    leaf[i] = d > 0 && hue >= 0.06 && hue <= 0.55 && sat >= 0.10 && mx >= 0.22 ? 1 : 0;
+    plantT[i] = leaf[i] || (d > 0 && hue < 0.06 && sat >= 0.15 && mx >= 0.25) ? 1 : 0;
+  }
+  const it = (full) => Math.max(1, Math.round(full * sGrid));
+  const minSide = Math.min(W, H);
+
+  // hands: skin blobs reaching the edge band, at least 2% of the photo, holes filled
+  let sk = gClose(gOpen(skin, gw, gh, 1), gw, gh, 1);
+  const lab = gLabel(sk, gw, gh), band = Math.max(1, Math.round(Math.min(gw, gh) * 0.02));
+  const edge = new Set();
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+    if (gx < band || gy < band || gx >= gw - band || gy >= gh - band) { const l = lab.ids[gy * gw + gx]; if (l) edge.add(l); }
+  }
+  const hands = Array.from(edge).filter((l) => lab.sizes[l] >= 0.02 * n).sort((a, b) => lab.sizes[b] - lab.sizes[a]).slice(0, 2)
+    .map((l) => { const m = new Uint8Array(n); for (let i = 0; i < n; i++) m[i] = lab.ids[i] === l ? 1 : 0; return fillHoles(m, gw, gh); });
+  const handAny = new Uint8Array(n);
+  hands.forEach((m) => { for (let i = 0; i < n; i++) if (m[i]) handAny[i] = 1; });
+  const negs = hands.map((m) => { const p = gDeepest(m, gw, gh); return { x: (p.x + 0.5) / sGrid, y: (p.y + 0.5) / sGrid, label: 0 }; });
+
+  // start points
+  const leafNoHand = new Uint8Array(n);
+  for (let i = 0; i < n; i++) leafNoHand[i] = leaf[i] && !handAny[i] ? 1 : 0;
+  const solid = gErode(leafNoHand, gw, gh, it(Math.max(3, Math.round(minSide * 0.012))));
+  const cands = [];
+  const ringIt = it(Math.max(6, Math.round(minSide * 0.03)));
+  hands.forEach((m) => {
+    const dil = gDilate(m, gw, gh, ringIt), ring = [];
+    for (let i = 0; i < n; i++) if (dil[i] && !m[i] && solid[i]) { const x = i % gw, y = (i - x) / gw; ring.push({ x, y, depth: Math.min(x, gw - 1 - x, y, gh - 1 - y) }); }
+    if (!ring.length) return;
+    ring.sort((a, b) => b.depth - a.depth);
+    const step = Math.max(1, Math.floor(ring.length / 3));
+    for (let j = 0, c = 0; j < ring.length && c < 3; j += step, c++) cands.push({ gx: ring[j].x, gy: ring[j].y });
+  });
+  let bestD = Infinity, near = null;
+  for (let i = 0; i < n; i++) if (solid[i]) { const x = i % gw, y = (i - x) / gw, d = (x - gw / 2) ** 2 + (y - gh / 2) ** 2; if (d < bestD) { bestD = d; near = { gx: x, gy: y }; } }
+  if (near) cands.push(near);
+  const notHand = gDilate(handAny, gw, gh, it(Math.max(4, Math.round(minSide * 0.01))));
+  [0.2, 0.35, 0.5, 0.65, 0.8].forEach((fy) => [0.2, 0.35, 0.5, 0.65, 0.8].forEach((fx) => {
+    const gx = Math.min(gw - 1, Math.floor(gw * fx)), gy = Math.min(gh - 1, Math.floor(gh * fy));
+    if (!notHand[gy * gw + gx]) cands.push({ gx, gy });
+  }));
+  if (!cands.length) return null;
+  const pts = cands.slice(0, 30).map((c) => ({ x: (c.gx + 0.5) / sGrid, y: (c.gy + 0.5) / sGrid, gx: c.gx, gy: c.gy }));
+
+  // one batched decoder run: each candidate = its leaf point + the hands' "not leaf" points
+  const B = pts.length, P = 1 + negs.length;
+  const coords = new Float32Array(B * P * 2), labels = new BigInt64Array(B * P);
+  pts.forEach((p, b) => {
+    [p].concat(negs).forEach((q, j) => { const o = b * P + j; coords[2 * o] = q.x * h.k; coords[2 * o + 1] = q.y * h.k; labels[o] = BigInt(j === 0 ? 1 : 0); });
+  });
+  const out = await sessions.dec.run({
+    input_points: new ort.Tensor("float32", coords, [1, B, P, 2]),
+    input_labels: new ort.Tensor("int64", labels, [1, B, P]),
+    image_embeddings: h.emb,
+    image_positional_embeddings: h.pos
+  });
+  const iouAll = out.iou_scores.data, masks = out.pred_masks.data;
+  const ringAny = hands.length ? gDilate(handAny, gw, gh, ringIt) : null;
+  let best = { score: 0 };
+  for (let b = 0; b < B; b++) {
+    let k = 0;
+    for (let j = 1; j < 3; j++) if (iouAll[b * 3 + j] > iouAll[b * 3 + k]) k = j;
+    const off = (b * 3 + k) * 256 * 256, iou = iouAll[b * 3 + k];
+    const lo = new Uint8Array(n);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (masks[off + y * 256 + x] > 0) lo[y * gw + x] = 1;
+    const seedI = pts[b].gy * gw + pts[b].gx;
+    const m = lo[seedI] ? gConnected(lo, gw, gh, seedI) : lo;
+    const sc = pyScore(m, gw, gh, iou, skin, plantT, ringAny, hands.length > 0);
+    if (sc > best.score) best = { score: sc, off, iou, b };
+  }
+  if (!(best.score > 0)) return null;
+  const pos = { x: pts[best.b].x, y: pts[best.b].y, label: 1, auto: true };
+  const roi = finish(h, masks.subarray(best.off, best.off + 256 * 256), [pos]);
+  if (hands.length) {   // a hand can still touch the mask edge
+    for (let y = 0; y < H; y++) {
+      const gy = Math.min(gh - 1, Math.floor(y * sGrid));
+      for (let x = 0; x < W; x++) if (handAny[gy * gw + Math.min(gw - 1, Math.floor(x * gw / W))]) roi[y * W + x] = 0;
+    }
+  }
+  return { roi, score: best.iou, point: pos, points: [pos].concat(negs.map((q) => Object.assign({ auto: true }, q))) };
+}
+
+// What the app calls: the Python-style field leaf finder first, the earlier one as a fallback;
+// a canopy or landscape photo (sky) gets null, so the person is asked to mark the leaf
+export async function findLeafAuto(h, imageData) {
+  const f = await fieldMask(h, imageData);
+  if (f && f.roi) return f;
+  if (f && f.sky) return null;
+  return autoMask(h, imageData);
+}
+
+function pyScore(m, gw, gh, iou, skin, plantT, ringAny, hasHand) {
+  const n = gw * gh;
+  let N = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sk = 0, pl = 0, dmin = 9, touch = false;
+  for (let i = 0; i < n; i++) {
+    if (!m[i]) continue;
+    const x = i % gw, y = (i - x) / gw;
+    N++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sk += skin[i]; pl += plantT[i];
+    const dc = Math.hypot((y - gh / 2) / gh, (x - gw / 2) / gw);
+    if (dc < dmin) dmin = dc;
+    if (ringAny && ringAny[i]) touch = true;
+  }
+  const frac = N / n;
+  if (frac < 0.01 || frac > tuning.maxArea || N < 10) return 0;
+  if (pl / N < 0.6) return 0;                                   // board, soil, clothes, sky
+  const mx = sx / N, my = sy / N;
+  const cxx = sxx / N - mx * mx, cyy = syy / N - my * my, cxy = sxy / N - mx * my;
+  const tr = cxx + cyy, det = cxx * cyy - cxy * cxy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+  const l1 = tr / 2 + disc, l2 = Math.max(1e-9, tr / 2 - disc);
+  const elong = Math.sqrt(l1 / l2), width = 4 * Math.sqrt(l2) / Math.min(gh, gw), skinIn = sk / N;
+  let s = iou * iou * Math.min(elong, 10) / 10 * (1 - skinIn) * (1 - skinIn);
+  s *= Math.min(1, width / 0.06);                               // thin stems and blades score low
+  s *= Math.min(1, Math.sqrt(frac / 0.04));
+  s *= Math.exp(-4 * dmin);                                     // the leaf shown is near the centre
+  if (hasHand && touch) s *= 1.5;                               // a held leaf touches the fingers
+  return s;
+}
+
+// small grid helpers (4-connected)
+function gErode(m, w, h, it) { for (let t = 0; t < it; t++) { const o = new Uint8Array(m.length); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; o[i] = m[i] && x > 0 && m[i - 1] && x < w - 1 && m[i + 1] && y > 0 && m[i - w] && y < h - 1 && m[i + w] ? 1 : 0; } m = o; } return m; }
+function gDilate(m, w, h, it) { for (let t = 0; t < it; t++) { const o = new Uint8Array(m.length); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; o[i] = m[i] || (x > 0 && m[i - 1]) || (x < w - 1 && m[i + 1]) || (y > 0 && m[i - w]) || (y < h - 1 && m[i + w]) ? 1 : 0; } m = o; } return m; }
+function gOpen(m, w, h, it) { return gDilate(gErode(m, w, h, it), w, h, it); }
+function gClose(m, w, h, it) { return gErode(gDilate(m, w, h, it), w, h, it); }
+function gLabel(m, w, h) {
+  const n = m.length, ids = new Int32Array(n), stack = new Int32Array(n), sizes = [0]; let k = 0;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!m[s0] || ids[s0]) continue;
+    k++; let sp = 0, size = 0; stack[sp++] = s0; ids[s0] = k;
+    while (sp) {
+      const i = stack[--sp], x = i % w; size++;
+      if (x > 0 && m[i - 1] && !ids[i - 1]) { ids[i - 1] = k; stack[sp++] = i - 1; }
+      if (x < w - 1 && m[i + 1] && !ids[i + 1]) { ids[i + 1] = k; stack[sp++] = i + 1; }
+      if (i >= w && m[i - w] && !ids[i - w]) { ids[i - w] = k; stack[sp++] = i - w; }
+      if (i < n - w && m[i + w] && !ids[i + w]) { ids[i + w] = k; stack[sp++] = i + w; }
+    }
+    sizes.push(size);
+  }
+  return { ids, sizes };
+}
+function gConnected(m, w, h, seed) {
+  const n = m.length, out = new Uint8Array(n), stack = new Int32Array(n); let sp = 0;
+  out[seed] = 1; stack[sp++] = seed;
+  while (sp) {
+    const i = stack[--sp], x = i % w;
+    if (x > 0 && m[i - 1] && !out[i - 1]) { out[i - 1] = 1; stack[sp++] = i - 1; }
+    if (x < w - 1 && m[i + 1] && !out[i + 1]) { out[i + 1] = 1; stack[sp++] = i + 1; }
+    if (i >= w && m[i - w] && !out[i - w]) { out[i - w] = 1; stack[sp++] = i - w; }
+    if (i < n - w && m[i + w] && !out[i + w]) { out[i + w] = 1; stack[sp++] = i + w; }
+  }
+  return out;
+}
+// the point deepest inside a mask (two-pass chamfer distance)
+function gDeepest(m, w, h) {
+  const n = m.length, d = new Float32Array(n), INF = 1e9;
+  for (let i = 0; i < n; i++) d[i] = m[i] ? INF : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!d[i]) continue; let v = d[i]; if (x > 0) v = Math.min(v, d[i - 1] + 1); else v = Math.min(v, 1); if (y > 0) v = Math.min(v, d[i - w] + 1); else v = Math.min(v, 1); d[i] = v; }
+  let best = 0, bi = 0;
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) { const i = y * w + x; if (!d[i]) continue; let v = d[i]; if (x < w - 1) v = Math.min(v, d[i + 1] + 1); else v = Math.min(v, 1); if (y < h - 1) v = Math.min(v, d[i + w] + 1); else v = Math.min(v, 1); d[i] = v; if (v > best) { best = v; bi = i; } }
+  return { x: bi % w, y: Math.floor(bi / w) };
+}
+
 // Limits for a candidate leaf region (tested on BLS_SD field photos against the Python analyzer)
 // maxArea 0.45 stops a board or background strip being taken as the leaf (BLS_SD_87.3: 47% -> 4%).
 // minPlant is a mild safety net: the app's plant colour test misses shaded leaves, so 0.5 or more
 // rejected real leaves on IMG_4828, 421-1 and 408; 0.3 rejects only regions that are mostly board or sky.
-export const tuning = { minPlant: 0.3, maxArea: 0.45 };
+export const tuning = { minPlant: 0.3, maxArea: 0.45, scoring: "app" };
 
 function leafiness(masks, off, gw, gh, plant, skin, iou) {
   const n = gw * gh, lo = new Uint8Array(n);
@@ -286,11 +487,13 @@ function leafiness(masks, off, gw, gh, plant, skin, iou) {
     }
     if (size > bestSize) { bestSize = size; bestId = id; }
   }
-  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, pl = 0, sk = 0;
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, pl = 0, sk = 0, dmin = 9;
   for (let i = 0; i < n; i++) {
     if (ids[i] !== bestId) continue;
     const x = i % gw, y = (i - x) / gw;
     sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; pl += plant[i]; sk += skin[i];
+    const dc = Math.hypot(y / gh - 0.5, x / gw - 0.5);   // how close the region comes to the centre
+    if (dc < dmin) dmin = dc;
   }
   const N = bestSize, mx = sx / N, my = sy / N;
   const cxx = sxx / N - mx * mx, cyy = syy / N - my * my, cxy = sxy / N - mx * my;
@@ -303,7 +506,16 @@ function leafiness(masks, off, gw, gh, plant, skin, iou) {
   // A board, paper or sky strip can be long and thin too: a leaf region must be mostly
   // plant-coloured (green, yellow, tan or brown lesions), as in the Python analyzer
   if (plantFrac < tuning.minPlant) return { score: -1, skinFrac: skinFrac, area: fa };
-  const score = iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5) * Math.max(0, 1 - 3 * skinFrac);
+  let score;
+  if (tuning.scoring === "python") {
+    // As python/bls_analyzer/sam.py: a whole leaf held near the camera beats a narrow strip of
+    // it — wide enough (width term), not a sliver (area term), reaching near the centre
+    const width = 4 * Math.sqrt(l2) / Math.min(gh, gw);
+    score = iou * iou * Math.min(elong, 10) / 10 * Math.pow(Math.max(0, 1 - skinFrac), 2) *
+      Math.min(1, width / 0.06) * Math.min(1, Math.sqrt(fa / 0.04)) * Math.exp(-4 * dmin);
+  } else {
+    score = iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5) * Math.max(0, 1 - 3 * skinFrac);
+  }
   return { score, skinFrac, area: fa };
 }
 

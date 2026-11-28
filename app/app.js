@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "1.0.2";
+  var APP_VERSION = "1.1.0";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
   var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
@@ -580,7 +580,7 @@
           var cached = samCache.get(data);
           return cached ? cached : m.embed(data).then(function (h) { samCache.set(data, h); return h; });
         })
-        .then(function (h) { return m.autoMask(h, data); });
+        .then(function (h) { return m.findLeafAuto(h, data); });
     }).then(function (a) {
       if (a) { noteFinder(null); return { found: { roi: a.roi, method: "auto", points: a.points || [a.point] } }; }
       if (bgFound) return { found: bgFound };
@@ -1765,7 +1765,7 @@
       if (prev && prev.points && prev.points.length) { tr.points = prev.points.slice(); return runMask(); }
       // No earlier points: let the leaf finder pick the leaf itself
       traceBusy("Finding the leaf…");
-      return segModule.autoMask(h, mine.imageData).then(function (a) {
+      return segModule.findLeafAuto(h, mine.imageData).then(function (a) {
         if (tr !== mine) return;
         if (a) { tr.points = [a.point]; tr.autoPoint = a.point; return runMask(); }
         tr.busy = false; traceBusy(null); tr.points = [];
@@ -2740,7 +2740,7 @@
     }).then(function (m) {
       out.textContent = "Finding the leaf in a test photo…";
       var t1 = performance.now();
-      return m.embed(img).then(function (h) { return m.autoMask(h, img); }).then(function (a) {
+      return m.embed(img).then(function (h) { return m.findLeafAuto(h, img); }).then(function (a) {
         if (!a) throw new Error("no leaf found in the test photo");
         var res = E.analyze(img.data, img.width, img.height, undefined, a.roi, "v2");
         noteFinder(null);
