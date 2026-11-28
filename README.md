@@ -226,6 +226,15 @@ BLS-Image-Analyzer/
 └── example_output/
 ```
 
+The repository also contains three related tools built on the same scoring rules:
+
+| Folder | Language | What it is |
+|---|---|---|
+| `BLS_Image_Analyzer.R` | R | The original analyzer (this README) |
+| `app/` | JavaScript | BLS Leaf Scorer, a web app for phones and PCs: <https://tapishpwr24.github.io/BLS_Image_Analyzer/app/> |
+| `study/` | JavaScript | Rating-mode test version of the app for rater studies: raters score each leaf by eye before the app does |
+| `python/` | Python | Batch analyzer for whole photo folders (automatic leaf finding on any background) and the rater-study evaluation (`bls_analyzer.study`); see `python/README.md` |
+
 ---
 
 # Running BLS Image Analyzer

@@ -1,0 +1,5 @@
+# Third-party libraries and model files: not counted in GitHub's language statistics
+app/vendor/** linguist-vendored
+study/vendor/** linguist-vendored
+*.onnx binary
+*.wasm binary
