@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "1.0.0";
+  var APP_VERSION = "1.0.1";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
   var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
@@ -654,9 +654,20 @@
   ["camInput", "fileInput", "secInput"].forEach(function (id) {
     $(id).addEventListener("click", function () { userActed = true; });
   });
+  // Where the last single leaf came from, so "Next leaf" and "Retake" open the same place
+  var lastSource = "camInput";
+  function openLastSource() { $(lastSource).click(); }
+  function setNextButtons() {
+    var gal = lastSource === "fileInput";
+    $("nextMain").htmlFor = lastSource;
+    $("nextIconCam").hidden = gal; $("nextIconGal").hidden = !gal;
+    $("nextAlt").htmlFor = gal ? "camInput" : "fileInput";
+    $("nextAlt").textContent = gal ? "Take photo" : "Gallery";
+  }
   ["camInput", "fileInput"].forEach(function (id) {
     $(id).addEventListener("change", function (ev) {
       userActed = true;
+      if (ev.target.files && ev.target.files.length) { lastSource = id; setNextButtons(); }
       batch.active = false;   // a single photo ends any set in progress
       var f = ev.target.files && ev.target.files[0];
       if (f) handleFile(f, f.name || ("leaf-" + Date.now() + ".jpg"), false, false);
@@ -979,7 +990,7 @@
     pendingRating = null;
     if (batch.active) { nextInQueue(); return; }
     analyzeState("capture");
-    $("camInput").click();
+    openLastSource();
   });
 
   // ---------- form helpers ----------
@@ -1083,7 +1094,8 @@
         }
         // Ready for the next leaf from the same plot: keep plot, trial, rater; bump leaf no.
         $("fLeaf").value = String((parseInt($("fLeaf").value, 10) || 0) + 1);
-        $("nextLeafLabel").textContent = "Next leaf (" + $("fLeaf").value + ")";
+        $("nextLeafLabel").textContent = (lastSource === "fileInput" ? "Next from gallery" : "Next leaf") + " (" + $("fLeaf").value + ")";
+        setNextButtons();
         var np = nextPlotAfter(meta.plot);
         $("nextPlotBtn").hidden = !np;
         if (np) { $("nextPlotBtn").textContent = "Next plot in list: " + np.plot + " →"; $("nextPlotBtn").dataset.plot = np.plot; }
@@ -2408,7 +2420,7 @@
     $("fPlot").value = $("nextPlotBtn").dataset.plot || "";
     $("fLeaf").value = "1";
     applyPlot();
-    $("camInput").click();
+    openLastSource();
   });
 
   function renderPlotSettings() {

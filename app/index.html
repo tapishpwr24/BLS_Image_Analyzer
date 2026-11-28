@@ -788,12 +788,15 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       <div class="saved-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
       <div><h3 id="savedTitle">Saved</h3><p class="small muted" id="savedText" style="margin:4px 0 0"></p></div>
       <div class="saved-actions">
-        <label class="btn btn-primary" for="camInput">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        <!-- the main button opens the same source the last leaf came from (camera or gallery) -->
+        <label class="btn btn-primary" for="camInput" id="nextMain">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" id="nextIconCam"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" id="nextIconGal" hidden><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/></svg>
           <span id="nextLeafLabel">Next leaf</span>
         </label>
-        <button class="btn btn-ghost" type="button" id="viewRecordsBtn">Records</button>
+        <label class="btn btn-ghost" for="fileInput" id="nextAlt">Gallery</label>
       </div>
+      <button class="link-btn" type="button" id="viewRecordsBtn">See records</button>
       <button class="link-btn" type="button" id="nextPlotBtn" hidden></button>
     </div>
 
