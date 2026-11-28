@@ -603,7 +603,7 @@ h3 { font: 750 17px/1.25 var(--font-display); font-stretch: 88%; letter-spacing:
 .splash { position: fixed; inset: 0; z-index: 100; background: var(--board); display: grid; place-items: center; transition: opacity 0.4s ease, transform 0.45s ease; }
 .splash.out { opacity: 0; transform: translateY(-28px); pointer-events: none; }
 .splash-logo { background: #fff; border-radius: 28px; padding: 18px 22px; box-shadow: 0 22px 54px rgba(0, 0, 0, 0.38); animation: bounceUp 0.95s cubic-bezier(.2,.9,.25,1.2) both; }
-.splash-logo img { width: min(230px, 62vw); height: auto; display: block; }
+.splash-logo img { width: min(180px, 56vw); height: auto; display: block; }   /* the logo file is 180 px wide: shown at its own size so it stays sharp */
 .splash-app { display: block; text-align: center; margin-top: 20px; color: var(--board-ink-2); font: 700 15px var(--font-display); font-stretch: 92%; animation: splashFade 0.5s ease 0.55s both; }
 @keyframes bounceUp {
   0% { transform: translateY(90px) scale(0.86); opacity: 0; }
@@ -612,11 +612,15 @@ h3 { font: 750 17px/1.25 var(--font-display); font-stretch: 88%; letter-spacing:
   100% { transform: none; }
 }
 @keyframes splashFade { from { opacity: 0; } to { opacity: 1; } }
+/* the welcome leaf's streaks wait until the splash has gone, so the two moments come one after the other */
+body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .splash-logo, .splash-app { animation: none; } .splash.out { transform: none; } }
 
 /* lab credit on the name screen */
-.lab-credit { justify-self: start; margin-top: 10px; background: #fff; border-radius: 12px; padding: 6px 10px; }
-.lab-credit img { height: 52px; width: auto; display: block; }
+.lab-credit { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); font-size: 13px; line-height: 1.35; color: var(--board-ink-2); }
+.lab-credit b { color: var(--board-ink); }
+.lab-chip { flex: none; background: #fff; border-radius: 14px; padding: 5px; }
+.lab-chip img { width: 72px; height: auto; display: block; }
 
 /* ---- how to rate: 3-step guide ---- */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -1137,7 +1141,7 @@ h3 { font: 750 17px/1.25 var(--font-display); font-stretch: 88%; letter-spacing:
     <span class="status-line err" id="wErr" role="alert"></span>
     <button class="btn btn-primary" type="submit" id="wStart">Start</button>
     <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
-    <div class="lab-credit"><img src="icons/ameen-lab-logo.png" alt="Ameen Lab, Plant Pathology" onerror="this.parentNode.remove()"></div>
+    <div class="lab-credit"><span class="lab-chip"><img src="icons/ameen-lab-logo.png" alt="" onerror="this.closest('.lab-credit').remove()"></span><span>Made by <b>Ameen Lab</b><br>Plant Pathology</span></div>
   </form>
 </div>
 
