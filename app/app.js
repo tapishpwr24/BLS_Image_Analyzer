@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.2.0";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
   var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
@@ -203,7 +203,7 @@
     }, 30);
 
     function scorePhoto(data) {
-        return (isSample ? Promise.resolve({ found: null }) : findLeaf(data)).then(function (step) {
+        return (isSample ? Promise.resolve({ found: null }) : findLeaf(data, appending ? null : mark)).then(function (step) {
           if (asExample && userActed) return { cancelled: true, stale: true };
           $("busy").hidden = true;
           // Leaf couldn't be found automatically: let the person mark it
@@ -376,7 +376,137 @@
   }
   function stem(name) { return String(name || "").replace(/\.[^.]+$/, ""); }
 
+  // ---------- mark around the leaf (optional, before the leaf finder) ----------
+  // The rater draws a rough loop around the leaf; the leaf finder then works only inside it.
+  var mark = null;        // { poly: [{x, y}, …] } in image pixels, for the photo being rated
+  var markData = null;    // that photo
+  var mk = null;          // drawing state while the marker is open
+  function setMarkButtons() {
+    $("markLabel").textContent = mark ? "Marked: change the loop" : "Mark around the leaf";
+    $("markBtn").classList.toggle("marked", !!mark);
+    $("markClear").hidden = !mark;
+  }
+  function drawRateMark() {
+    drawPhoto($("rateCanvas"), $("rateFrame"), markData);
+    if (!mark) return;
+    var cv = $("rateCanvas"), ctx = cv.getContext("2d"), rotate = markData.height > markData.width * 1.6;
+    ctx.save();
+    if (rotate) { ctx.translate(cv.width, 0); ctx.rotate(Math.PI / 2); }
+    ctx.beginPath();
+    mark.poly.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(227,181,60,0.16)"; ctx.fill();
+    ctx.lineWidth = Math.max(4, Math.max(markData.width, markData.height) / 220);
+    ctx.strokeStyle = "#e3b53c"; ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2]); ctx.stroke();
+    ctx.restore();
+  }
+  function markerDraw() {
+    var c = $("markerCanvas"), ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(mk.img, 0, 0, c.width, c.height);
+    if (mk.path.length < 2) return;
+    ctx.beginPath();
+    mk.path.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    if (mk.closed) { ctx.closePath(); ctx.fillStyle = "rgba(227,181,60,0.22)"; ctx.fill(); }
+    ctx.lineWidth = 3; ctx.strokeStyle = "#e3b53c"; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
+  }
+  function openMarker() {
+    if (!markData) return;
+    var tmp = document.createElement("canvas");
+    tmp.width = markData.width; tmp.height = markData.height;
+    tmp.getContext("2d").putImageData(markData, 0, 0);
+    $("marker").hidden = false;
+    document.body.style.overflow = "hidden";
+    var st = $("markerStage"), r = st.getBoundingClientRect();
+    var s = Math.min((r.width - 12) / markData.width, (r.height - 12) / markData.height);
+    var c = $("markerCanvas");
+    c.width = Math.round(markData.width * s); c.height = Math.round(markData.height * s);
+    c.style.width = c.width + "px"; c.style.height = c.height + "px";
+    mk = { img: tmp, s: s, path: mark ? mark.poly.map(function (p) { return { x: p.x * s, y: p.y * s }; }) : [], closed: !!mark, drawing: false };
+    $("markerUse").disabled = !mk.closed;
+    $("markerHint").textContent = "Keep other leaves, hands and labels outside the loop.";
+    markerDraw();
+  }
+  function closeMarker() { $("marker").hidden = true; document.body.style.overflow = ""; mk = null; }
+  function markerPoint(ev) {
+    var r = $("markerCanvas").getBoundingClientRect();
+    return { x: Math.max(0, Math.min(r.width, ev.clientX - r.left)), y: Math.max(0, Math.min(r.height, ev.clientY - r.top)) };
+  }
+  $("markerCanvas").addEventListener("pointerdown", function (ev) {
+    if (!mk) return;
+    ev.preventDefault();
+    try { $("markerCanvas").setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    mk.path = [markerPoint(ev)]; mk.closed = false; mk.drawing = true;
+    $("markerUse").disabled = true;
+    markerDraw();
+  });
+  $("markerCanvas").addEventListener("pointermove", function (ev) {
+    if (!mk || !mk.drawing) return;
+    var p = markerPoint(ev), last = mk.path[mk.path.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= 3) { mk.path.push(p); markerDraw(); }
+  });
+  function endMarkStroke() {
+    if (!mk || !mk.drawing) return;
+    mk.drawing = false;
+    // a loop needs some size: at least 8 points and 1% of the photo
+    var area = 0, P = mk.path;
+    for (var i = 0, j = P.length - 1; i < P.length; j = i++) area += (P[j].x + P[i].x) * (P[j].y - P[i].y);
+    area = Math.abs(area / 2) / ($("markerCanvas").width * $("markerCanvas").height);
+    if (P.length < 8 || area < 0.01) {
+      mk.path = []; mk.closed = false; markerDraw();
+      $("markerHint").textContent = "Too small. Draw one loop all the way around the leaf.";
+      return;
+    }
+    mk.closed = true; $("markerUse").disabled = false; buzz(10);
+    $("markerHint").textContent = "Happy with it? Tap Use this area, or draw again.";
+    markerDraw();
+  }
+  $("markerCanvas").addEventListener("pointerup", endMarkStroke);
+  $("markerCanvas").addEventListener("pointercancel", endMarkStroke);
+  $("markerRedo").addEventListener("click", function () { if (!mk) return; mk.path = []; mk.closed = false; $("markerUse").disabled = true; markerDraw(); });
+  $("markerCancel").addEventListener("click", closeMarker);
+  $("markerUse").addEventListener("click", function () {
+    if (!mk || !mk.closed) return;
+    var s = mk.s;
+    mark = { poly: mk.path.map(function (p) { return { x: p.x / s, y: p.y / s }; }) };
+    closeMarker(); setMarkButtons(); drawRateMark();
+    toast("The app will look for the leaf only inside your loop");
+  });
+  $("markBtn").addEventListener("click", openMarker);
+  $("markClear").addEventListener("click", function () { mark = null; setMarkButtons(); drawRateMark(); });
+
+  // Leaf finding inside the marked loop: crop to the loop (plus a small margin), run the usual
+  // leaf finding on the crop, then keep only what lies inside the loop
+  function findLeafInMark(data, m) {
+    var W = data.width, H = data.height, x0 = W, y0 = H, x1 = 0, y1 = 0;
+    m.poly.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+    var pad = Math.round(0.03 * Math.max(x1 - x0, y1 - y0));
+    x0 = Math.max(0, Math.floor(x0 - pad)); y0 = Math.max(0, Math.floor(y0 - pad));
+    x1 = Math.min(W, Math.ceil(x1 + pad)); y1 = Math.min(H, Math.ceil(y1 + pad));
+    var cw = x1 - x0, ch = y1 - y0;
+    var crop = new ImageData(cw, ch);
+    for (var y = 0; y < ch; y++) crop.data.set(data.data.subarray(((y + y0) * W + x0) * 4, ((y + y0) * W + x1) * 4), y * cw * 4);
+    // the loop as a mask over the whole photo
+    var lc = document.createElement("canvas"); lc.width = W; lc.height = H;
+    var lx = lc.getContext("2d", { willReadFrequently: true });
+    lx.beginPath(); m.poly.forEach(function (p, i) { if (i) lx.lineTo(p.x, p.y); else lx.moveTo(p.x, p.y); }); lx.closePath();
+    lx.fillStyle = "#fff"; lx.fill();
+    var la = lx.getImageData(0, 0, W, H).data;
+    return findLeafIn(crop).then(function (step) {
+      if (!step.found) return { manual: true, reason: "No leaf was found inside your loop. Mark the leaf by hand." };
+      var f = step.found, roi = new Uint8Array(W * H), labels = f.labels ? new Int32Array(W * H) : null, n = 0;
+      for (var yy = 0; yy < ch; yy++) for (var xx = 0; xx < cw; xx++) {
+        var ci = yy * cw + xx, fi = (yy + y0) * W + xx + x0;
+        if (f.roi[ci] && la[fi * 4 + 3] > 0) { roi[fi] = 1; n++; if (labels) labels[fi] = f.labels[ci]; }
+      }
+      if (n < 200) return { manual: true, reason: "No leaf was found inside your loop. Mark the leaf by hand." };
+      return { found: { roi: roi, method: "marked", labels: labels, leafCount: f.leafCount,
+        points: f.points ? f.points.map(function (p) { return Object.assign({}, p, { x: p.x + x0, y: p.y + y0 }); }) : null } };
+    });
+  }
+
   function askRating(data, name) {
+    markData = data; mark = null; setMarkButtons();
     drawPhoto($("rateCanvas"), $("rateFrame"), data);
     // The rater ID is asked once; after that it is shown, not asked again
     $("rRater").value = settings.rater || $("fRater").value.trim() || "";
@@ -563,7 +693,14 @@
     $("busyTitle").textContent = title;
     $("busyText").textContent = text;
   }
-  function findLeaf(data) {
+  function findLeaf(data, m) {
+    if (m && m.poly && m.poly.length >= 3) {
+      busyText("Finding the leaf…", "Looking only inside the area you marked");
+      return findLeafInMark(data, m);
+    }
+    return findLeafIn(data);
+  }
+  function findLeafIn(data) {
     busyText("Finding the leaf…", "Separating the leaf from the background");
     // Same leaf finding as the Python analyzer (leaffind.js): any uniform background,
     // labels / tape / glare dropped, only leaf-shaped pieces kept
@@ -960,7 +1097,7 @@
     }
     var L = r.lesions;
     $("lesionLine").innerHTML = L && L.count ? "<b>" + L.count + "</b> lesion" + (L.count === 1 ? "" : "s") + " · average size <b>" + L.meanSizePct.toFixed(2) + "%</b> of leaf · largest <b>" + L.largestPct.toFixed(1) + "%</b>" : "";
-    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ background: "Leaf separated from the background automatically (labels and glare left out)", board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
+    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ marked: "Leaf found inside the area you marked", background: "Leaf separated from the background automatically (labels and glare left out)", board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
       "auto + taps": "Leaf found automatically, adjusted by you", traced: "Leaf outlined by you", "whole photo": "Whole photo scored as leaf", mixed: "Sections separated in different ways" })[r.segmentation] || "";
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
@@ -1654,7 +1791,7 @@
   var samCache = new WeakMap();   // imageData -> image embedding, so re-opening is instant
 
   function segLabel(v) {
-    return { "background": "Separated from the background automatically", "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
+    return { "marked": "Found inside the area the rater marked", "background": "Separated from the background automatically", "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
       "traced": "Outline traced by hand", "mixed": "Mixed methods", "black board": "Black board" }[v] || v || "Black board";
   }
   function getSeg() { return segModule ? Promise.resolve(segModule) : import("./segment.js").then(function (m) { return (segModule = m); }); }

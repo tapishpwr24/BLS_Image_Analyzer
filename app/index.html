@@ -623,6 +623,22 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
 .lab-chip { flex: none; background: #fff; border-radius: 14px; padding: 5px; }
 .lab-chip img { width: 72px; height: auto; display: block; }
 
+/* ---- mark around the leaf (optional, before the leaf finder) ---- */
+.mark-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mark-row .btn { min-height: 46px; }
+.mark-row .btn.marked { background: var(--straw); color: #1a1405; }
+.marker { position: fixed; inset: 0; z-index: 70; background: #050806; color: #eef4ec; display: grid; grid-template-rows: auto 1fr auto;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.marker-top { display: grid; gap: 2px; padding: 14px 16px 8px; }
+.marker-top b { font: 800 21px/1.15 var(--font-display); font-stretch: 80%; }
+.marker-top span { font-size: 14px; color: #a9c4b0; }
+.marker-stage { position: relative; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: 6px; }
+.marker-stage canvas { touch-action: none; border-radius: 6px; cursor: crosshair; }
+.marker-foot { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; padding: 10px 16px 14px; }
+.marker-foot .btn { min-height: 52px; }
+.marker-foot .btn-ghost { color: #eef4ec; border-color: rgba(255, 255, 255, 0.22); }
+.marker-foot .btn-primary { background: var(--straw); color: #1a1405; }
+
 /* ---- resume an interrupted photo set ---- */
 .resume-card { border: 2px solid var(--straw); }
 .solo-note { background: var(--surface-2); }
@@ -810,7 +826,14 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
           <div class="leaf-frame" id="rateFrame"><canvas id="rateCanvas" aria-label="Original photo"></canvas></div>
           <div class="spec-label" aria-hidden="true"><span>Plant</span><b id="specPlot">–</b><span id="specMeta"></span></div>
         </div>
-        <p class="small muted" style="margin:0">Scroll the photo to see all of the leaf. The app scores it only after you lock your rating.</p>
+        <div class="mark-row">
+          <button class="btn btn-soft" type="button" id="markBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 5c4-3 12-2 13 4s-6 11-11 10S2 13 4 9" stroke-dasharray="3 3"/><path d="M12 9c-1 2-1 5 0 7" /></svg>
+            <span id="markLabel">Mark around the leaf</span>
+          </button>
+          <button class="link-btn" type="button" id="markClear" hidden>Remove mark</button>
+        </div>
+        <p class="small muted" style="margin:0" id="markHint">Optional: draw a loop around the leaf and the app looks only inside it. Useful when other leaves, a hand or labels are in the photo.</p>
         <div class="rater-line" id="rRaterChip" hidden>
           <span>Rater <b id="rRaterName"></b></span>
           <button class="link-btn" type="button" id="rRaterChange">Change rater</button>
@@ -1295,7 +1318,7 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       </div>
       <h3>Rate it by eye first</h3>
       <p>The app hides its score until you have rated. Check the <b>plant ID</b> (use − / + or scan the label), tap your <b>1–9 score</b> on the band, then tap the closest <b>% diseased</b>.</p>
-      <p class="g-tip">Judge the leaf, not the score you expect. There are no wrong answers.</p>
+      <p class="g-tip">Judge the leaf, not the score you expect. Other leaves, a hand or labels in the photo? Tap <b>Mark around the leaf</b> and draw a loop: the app then looks only inside it.</p>
     </section>
 
     <section class="g-step" hidden>
@@ -1313,6 +1336,19 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       <div class="g-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
       <button class="btn btn-primary" type="button" id="gNext">Next</button>
     </div>
+  </div>
+</div>
+
+<div class="marker" id="marker" hidden role="dialog" aria-modal="true" aria-labelledby="markerTitle">
+  <div class="marker-top">
+    <b id="markerTitle">Draw a loop around the leaf</b>
+    <span id="markerHint">Keep other leaves, hands and labels outside the loop.</span>
+  </div>
+  <div class="marker-stage" id="markerStage"><canvas id="markerCanvas" aria-label="Photo to mark"></canvas></div>
+  <div class="marker-foot">
+    <button class="btn btn-ghost" type="button" id="markerCancel">Cancel</button>
+    <button class="btn btn-ghost" type="button" id="markerRedo">Clear</button>
+    <button class="btn btn-primary" type="button" id="markerUse" disabled>Use this area</button>
   </div>
 </div>
 
