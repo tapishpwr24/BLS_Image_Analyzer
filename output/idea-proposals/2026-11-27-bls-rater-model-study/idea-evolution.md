@@ -23,3 +23,27 @@ Share the existing BLS photo folder (greenhouse and field) with several raters, 
 - Target venue: **Plant Phenomics**.
 - Reference standard: **rater panel on all photos + about 100 leaves with lesions outlined pixel by pixel** as objective ground truth.
 - Brief: "mostly" confirmed; the user's requested changes are still to come.
+
+## Version 0.1 (user change, 2026-11-28)
+The user wants a publishable paper AND a tool people use. Added contribution (4): a usability and adoption evaluation of the app with raters and breeders (System Usability Scale [Brooke, 1996], time per leaf versus visual scoring plus data entry, offline field use), and open release of app, model and data.
+
+## Round 1 → Version 1 (refinement; literature policy: < 30% change, Phase 2 context reused + 1 supplementary search on rater studies and usability)
+
+Scores before → after: Novelty 7→8, Technical Soundness 6→8, Feasibility 7→7, Significance 7→8, Clarity 6→8, Experimental Validity 6→8, Scalability 6→7, Positioning 8→8. Overall 6.6 → 7.75.
+
+Changes and reasons:
+1. **Reference hierarchy (Technical Soundness).** (a) True severity from pixel masks on a held-out gold set; (b) rater consensus = median of raters' % per photo; (c) a latent-truth estimate from a mixed model with rater bias as a random effect (sensitivity analysis). The model is never tuned on Set A.
+2. **Two photo sets (Clarity, Soundness).**
+   - Set A, the gold test set: 150 leaves stratified by 1–9 class and greenhouse/field, held out by genotype/plot. Lesions are outlined by 2 annotators (agreement measured). Every rater scores all 150 twice: unaided, and with the SAD 2+ weeks later. 20 repeats are hidden in each round.
+   - Set B, development: the remaining ~850 photos. Each is scored by 3 raters in a balanced incomplete design; 300 of them are outlined for training (model-assisted).
+3. **Rater protocol (Clarity).** 10–15 raters (experienced and novice), blind to the app's score, random order, % diseased (primary) and 1–9 in the app's Study mode, rater ID and time stored.
+4. **Chlorosis (Soundness).** Report necrotic % and necrotic + chlorotic % for raters and the model alike.
+5. **Evaluation (Experimental Validity).**
+   - Baselines: individual raters, the rater panel, app rules v2, taught colours (naive Bayes, PlantCV/pliman style), single-stage CNN regression, and a StripeRust-Pocket-style DeepLabV3+.
+   - Ablations: no SAM leaf finder, no chlorosis class, no "other" class, greenhouse-only training tested on field, training size 50/100/300, phone model versus server model.
+   - External datasets: public field wheat stripe-rust images [Zhao et al., 2025] and in-field wheat leaf data [Zenkl et al., 2025] for leaf and necrosis transfer.
+   - Statistics: Lin's ρc with bootstrap CIs; an equivalence test of model error against inter-rater error ("model as one more rater"); ICC; weighted kappa; repeatability.
+6. **Usability (Significance, Novelty).** SUS after use, seconds per leaf (app versus visual plus data entry), an offline field session, and adoption intent (TAM items [Davis, 1989]).
+7. **Scalability.** A barley transfer test on 100 leaves after the wheat paper; the pipeline can be retrained for other foliar diseases with taught colours.
+
+New dependency on the app: **Study mode** (blind, randomised, rater ID, export) must be built before raters start.
