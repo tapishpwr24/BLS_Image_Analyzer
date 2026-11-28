@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.11.0";
+  var APP_VERSION = "0.11.1";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -588,7 +588,46 @@
       .then(function (b) { handleFile(b, "BLS_02.jpg", true, asExample); })
       .catch(function () { analyzeState("capture"); toast("The example leaf could not be loaded."); });
   }
-  $("sampleBtn").addEventListener("click", function () { loadSample(false); });
+  $("sampleBtn").addEventListener("click", function () { openGuide(); });
+
+  // ---------- how to rate: 3-step guide ----------
+  var guideStep = 0;
+  function showGuideStep(i) {
+    var steps = document.querySelectorAll("#guide .g-step");
+    guideStep = Math.max(0, Math.min(steps.length - 1, i));
+    steps.forEach(function (s, k) { s.hidden = k !== guideStep; });
+    document.querySelectorAll("#guide .g-dots i").forEach(function (d, k) { d.classList.toggle("on", k === guideStep); });
+    $("gBack").style.visibility = guideStep ? "visible" : "hidden";
+    $("gNext").textContent = guideStep === steps.length - 1 ? "Start rating" : "Next";
+    $("gCount").textContent = "Step " + (guideStep + 1) + " of " + steps.length;
+  }
+  function openGuide() {
+    showGuideStep(0);
+    $("guide").hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(function () { try { $("gNext").focus(); } catch (e) { /* ignore */ } }, 60);
+  }
+  function closeGuide() {
+    $("guide").hidden = true;
+    document.body.style.overflow = "";
+    if (!settings.guideSeen) { settings.guideSeen = true; Settings.save(settings); }
+  }
+  $("gNext").addEventListener("click", function () {
+    if (guideStep >= document.querySelectorAll("#guide .g-step").length - 1) closeGuide();
+    else showGuideStep(guideStep + 1);
+  });
+  $("gBack").addEventListener("click", function () { showGuideStep(guideStep - 1); });
+  $("gSkip").addEventListener("click", closeGuide);
+  // Swipe between steps on phones
+  (function () {
+    var x0 = null;
+    $("guide").addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    $("guide").addEventListener("touchend", function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 50) showGuideStep(guideStep + (dx < 0 ? 1 : -1));
+    }, { passive: true });
+  })();
 
   // ---------- GPS ----------
   function requestGps() {
@@ -964,8 +1003,9 @@
     updateHeader(); updateContext(); renderQr();
     $("welcome").hidden = true;
     document.body.style.overflow = "";
-    if (changed) toast("Rating as " + name);
+    if (changed && settings.guideSeen) toast("Rating as " + name);
     registerUser();
+    if (!settings.guideSeen) openGuide();
   }
   $("wForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
@@ -2479,8 +2519,9 @@
   if (isInstalled()) protectStorage();
   refreshPending();
   syncPending();
-  // Open in a working state: first-time users see the example leaf scored below the camera panel
-  Records.all().then(function (all) { if (!all.length && !current) loadSample(true); });
+  // The rating app opens on the camera panel only: no example result. New people get the
+  // 3-step guide after they enter their name (see startAs); people who had a name already see it once here.
+  if (settings.rater && !settings.guideSeen) openGuide();
 
   if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
     try {
