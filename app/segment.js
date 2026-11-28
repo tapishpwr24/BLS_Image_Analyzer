@@ -258,12 +258,19 @@ function skinPoints(masks, off, gw, gh, skin, h) {
   return blobs.slice(0, 3).map((b) => ({ x: (b.x + 0.5) * 4 / h.k, y: (b.y + 0.5) * 4 / h.k, label: 0 }));
 }
 
+// Limits for a candidate leaf region (tested on BLS_SD field photos against the Python analyzer)
+// maxArea 0.45 stops a board or background strip being taken as the leaf (BLS_SD_87.3: 47% -> 4%).
+// minPlant is a mild safety net: the app's plant colour test misses shaded leaves, so 0.5 or more
+// rejected real leaves on IMG_4828, 421-1 and 408; 0.3 rejects only regions that are mostly board or sky.
+export const tuning = { minPlant: 0.3, maxArea: 0.45 };
+
 function leafiness(masks, off, gw, gh, plant, skin, iou) {
   const n = gw * gh, lo = new Uint8Array(n);
   let area = 0;
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (masks[off + y * 256 + x] > 0) { lo[y * gw + x] = 1; area++; }
   const fa = area / n;
-  if (fa < 0.01 || fa > 0.6) return { score: -1, skinFrac: 1, area: fa };
+  // a single leaf never fills half the photo (as in the Python analyzer: at most 45%)
+  if (fa < 0.01 || fa > tuning.maxArea) return { score: -1, skinFrac: 1, area: fa };
   // largest connected part
   const ids = new Int32Array(n), stack = new Int32Array(n);
   let bestId = 0, bestSize = 0, id = 0;
@@ -293,6 +300,9 @@ function leafiness(masks, off, gw, gh, plant, skin, iou) {
   const plantFrac = pl / N;
   const cent = 1 - Math.min(1, 2 * Math.hypot(mx / gw - 0.5, my / gh - 0.5));
   const skinFrac = sk / N;
+  // A board, paper or sky strip can be long and thin too: a leaf region must be mostly
+  // plant-coloured (green, yellow, tan or brown lesions), as in the Python analyzer
+  if (plantFrac < tuning.minPlant) return { score: -1, skinFrac: skinFrac, area: fa };
   const score = iou * Math.min(elong, 8) / 8 * plantFrac * (0.4 + 0.6 * cent) * (fa > 0.02 ? 1 : 0.5) * Math.max(0, 1 - 3 * skinFrac);
   return { score, skinFrac, area: fa };
 }

@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "1.0.1";
+  var APP_VERSION = "1.0.2";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
   var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
