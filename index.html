@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BLS Leaf Scorer</title>
+<meta name="description" content="Rate bacterial leaf streak on wheat leaves by eye, then compare with the app's image score. Free, works offline, on phones and computers.">
+<meta name="theme-color" content="#0e2318">
+<link rel="icon" href="study/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="study/icons/apple-touch-icon.png">
+<!-- link previews in WhatsApp, email, Slack, Teams -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="BLS Leaf Scorer">
+<meta property="og:description" content="Rate bacterial leaf streak on wheat leaves by eye, then compare with the app's image score. Developed by Tapish Pawar, Ameen Lab, SDSU.">
+<meta property="og:url" content="https://tapishpwr24.github.io/BLS_Image_Analyzer/">
+<meta property="og:image" content="https://tapishpwr24.github.io/BLS_Image_Analyzer/study/icons/ameen-lab-logo.png">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="study/vendor/fonts/fonts.css">
+<style>
+  :root {
+    --bg: #e5ece7; --surface: #fbfcfa; --surface-2: #eef3ef; --line: #cbd7ce;
+    --ink: #0e2318; --ink-2: #4a5f51; --board: #0e2318; --board-ink: #eef4ec; --board-ink-2: #a8c2af;
+    --straw: #e3b53c; --accent: #17402b;
+    --band: linear-gradient(90deg, #3e8e4e 0%, #5e9a43 12.5%, #84a53b 25%, #abae38 37.5%, #d3b03a 50%, #d2913a 62.5%, #be6b33 75%, #a4482a 87.5%, #6e2c1b 100%);
+    --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0a140f; --surface: #112019; --surface-2: #192b22; --line: #273b30; --ink: #e7efe8; --ink-2: #9db1a3; --accent: #9bd3a6; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 400 16px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--straw); outline-offset: 2px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)); }
+
+  /* hero: the field-green board with the disease band along its top */
+  .hero { background: var(--board) var(--band) top / 100% 6px no-repeat; color: var(--board-ink); padding-block: 40px 44px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.25fr 1fr; gap: 36px; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .brand img { width: 62px; height: auto; background: #fff; border-radius: 14px; padding: 4px; }
+  .brand span { font: 600 14px/1.35 var(--display); color: var(--board-ink-2); }
+  h1 { font: 800 clamp(46px, 9vw, 84px)/0.92 var(--display); font-stretch: 64%; letter-spacing: -0.025em; margin: 0 0 16px; color: #fff; }
+  .lead { font-size: clamp(17px, 2.2vw, 19px); color: var(--board-ink); max-width: 46ch; margin: 0 0 26px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 54px; padding: 0 22px; border-radius: 12px; border: 1px solid transparent; font: 750 16px var(--display); font-stretch: 96%; text-decoration: none; cursor: pointer; }
+  .btn-go { background: var(--straw); color: #1a1405; font-size: 18px; padding: 0 28px; }
+  .btn-ghost { background: transparent; color: var(--board-ink); border-color: rgba(255,255,255,0.25); }
+  .btn svg { width: 20px; height: 20px; }
+  .copied { font-size: 14px; color: var(--board-ink-2); min-height: 22px; margin-top: 10px; }
+
+  /* QR card: a mounted specimen label */
+  .qr-card { justify-self: end; background: #fbfcfa; color: #0e2318; border-radius: 6px; padding: 18px 18px 14px; width: min(300px, 100%); position: relative; box-shadow: 0 18px 48px rgba(0,0,0,0.35); }
+  .qr-card::before, .qr-card::after { content: ""; position: absolute; top: -8px; width: 62px; height: 18px; background: rgba(227,181,60,0.55); border-radius: 2px; }
+  .qr-card::before { left: 16px; transform: rotate(-7deg); } .qr-card::after { right: 16px; transform: rotate(6deg); }
+  .qr-card #qr svg { width: 100%; height: auto; display: block; }
+  .qr-card p { margin: 10px 0 0; font: 600 14px/1.35 var(--display); text-align: center; }
+  .qr-card small { display: block; text-align: center; font: 500 12px var(--body); color: #4a5f51; word-break: break-all; margin-top: 4px; }
+
+  section { padding-block: 44px 8px; }
+  h2 { font: 800 clamp(30px, 5vw, 44px)/1 var(--display); font-stretch: 70%; letter-spacing: -0.015em; margin: 0 0 18px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  .steps li { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; counter-increment: s; }
+  .steps li::before { content: counter(s); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 999px; background: var(--board); color: var(--straw); font: 800 18px var(--display); margin-bottom: 10px; }
+  .steps b { display: block; font: 750 19px/1.2 var(--display); font-stretch: 88%; margin-bottom: 6px; }
+  .steps span { color: var(--ink-2); font-size: 15px; }
+
+  .band-strip { height: 14px; border-radius: 14px 4px 14px 4px; background: var(--band); margin: 6px 0 18px; }
+
+  .install { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .install div { border-top: 3px solid var(--straw); padding-top: 12px; }
+  .install h3 { font: 750 19px var(--display); font-stretch: 88%; margin: 0 0 6px; }
+  .install p { margin: 0; color: var(--ink-2); font-size: 15px; }
+
+  .team { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .team div { background: var(--surface-2); border-radius: 16px; padding: 18px; }
+  .team h3 { font: 750 19px var(--display); font-stretch: 88%; margin: 0 0 6px; }
+  .team p { margin: 0; font-size: 15px; color: var(--ink-2); }
+
+  footer { margin-top: 48px; padding-block: 26px calc(26px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-2); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 22px; justify-content: space-between; align-items: center; }
+  footer b { color: var(--ink); }
+  footer nav { display: flex; gap: 18px; flex-wrap: wrap; }
+
+  @media (max-width: 760px) {
+    .hero .wrap { grid-template-columns: 1fr; gap: 28px; }
+    .qr-card { justify-self: start; width: min(240px, 70%); }
+    .steps, .install, .team { grid-template-columns: 1fr; }
+    .cta .btn { flex: 1 1 auto; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .btn { transition: transform 0.12s ease; } .btn:active { transform: scale(0.97); }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <div class="brand">
+        <img src="study/icons/ameen-lab-logo.png" alt="Ameen Lab, Plant Pathology">
+        <span>Ameen Lab<br>South Dakota State University</span>
+      </div>
+      <h1>BLS Leaf Scorer</h1>
+      <p class="lead">Rate bacterial leaf streak on wheat leaves by eye, then see how the app scores the same leaf from the photo. Free, works offline, on phones and computers.</p>
+      <div class="cta">
+        <a class="btn btn-go" href="study/">Open the app</a>
+        <button class="btn btn-ghost" type="button" id="shareBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg>
+          <span id="shareLabel">Share link</span>
+        </button>
+      </div>
+      <div class="copied" id="copied" role="status"></div>
+    </div>
+    <div class="qr-card">
+      <div id="qr" aria-label="QR code that opens the app"></div>
+      <p>Scan with your phone camera</p>
+      <small id="qrUrl"></small>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section aria-labelledby="how">
+    <h2 id="how">How it works</h2>
+    <ol class="steps">
+      <li><b>Photograph or pick a leaf</b><span>Take a photo, choose one from the gallery, or rate a whole set of photos one at a time.</span></li>
+      <li><b>Rate it by eye first</b><span>Tap the plant ID, a 1–9 BLS score and the % diseased. The app's score stays hidden until you lock your rating.</span></li>
+      <li><b>Compare and save</b><span>The app finds the leaf, scores it, and shows its result next to yours. Everything is saved with your name and the plant ID.</span></li>
+    </ol>
+    <div class="band-strip" aria-hidden="true"></div>
+  </section>
+
+  <section aria-labelledby="install">
+    <h2 id="install">Install it like an app</h2>
+    <div class="install">
+      <div><h3>Android</h3><p>Open the app in Chrome, tap the ⋮ menu, then <b>Install app</b> or <b>Add to Home screen</b>.</p></div>
+      <div><h3>iPhone and iPad</h3><p>Open the app in Safari, tap the <b>Share</b> button, then <b>Add to Home Screen</b>.</p></div>
+      <div><h3>Computer</h3><p>In Chrome or Edge, click the install icon at the right of the address bar.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="team">
+    <h2 id="team">On your own or as a team</h2>
+    <div class="team">
+      <div><h3>On your own</h3><p>Nothing to set up. Ratings and photos stay on your device; export a spreadsheet or a backup whenever you need them.</p></div>
+      <div><h3>As a team</h3><p>The team leader connects a Google Sheet once (Settings → Connect a Google Sheet) and shares the team QR code. Everyone's ratings and photos then go to the leader's Sheet and Drive.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Developed by <b>Tapish Pawar</b>, Ameen Lab, South Dakota State University (SDSU)</span>
+    <nav>
+      <a href="study/privacy.html">Privacy</a>
+      <a href="https://github.com/tapishpwr24/BLS_Image_Analyzer" rel="noopener">Source code</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="study/vendor/qrcode.js"></script>
+<script>
+(function () {
+  var appUrl = new URL("study/", location.href).href;
+  var pageUrl = location.origin + location.pathname;
+  document.getElementById("qrUrl").textContent = appUrl.replace(/^https?:\/\//, "");
+  try {
+    var qr = window.qrcode(0, "M"); qr.addData(appUrl); qr.make();
+    document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  } catch (e) { document.getElementById("qr").textContent = appUrl; }
+
+  var btn = document.getElementById("shareBtn"), out = document.getElementById("copied");
+  if (navigator.share) document.getElementById("shareLabel").textContent = "Share";
+  btn.addEventListener("click", function () {
+    var data = { title: "BLS Leaf Scorer", text: "Rate bacterial leaf streak on wheat leaves with this app:", url: pageUrl };
+    if (navigator.share) { navigator.share(data).catch(function () {}); return; }
+    try {
+      navigator.clipboard.writeText(pageUrl).then(function () { out.textContent = "Link copied: " + pageUrl; },
+        function () { out.textContent = pageUrl; });
+    } catch (e) { out.textContent = pageUrl; }
+  });
+})();
+</script>
+</body>
+</html>
