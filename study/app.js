@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.11.1";
+  var APP_VERSION = "0.12.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -79,6 +79,7 @@
     $("savedCard").hidden = state !== "saved";
     $("errorCard").hidden = state !== "error";
     if (state === "error") $("capture").hidden = false;
+    if (state === "capture" || state === "saved") refreshResume(); else $("resumeCard").hidden = true;
   }
 
   // ---------- image loading ----------
@@ -431,6 +432,26 @@
     return a;
   }
   $("batchInput").addEventListener("click", function () { userActed = true; });
+  var Sets = window.BLSStore.Sets;
+
+  // Hidden repeats: a share of the set comes back later, unannounced, so each rater's
+  // consistency can be measured. Only in photo sets, never for photos taken with the camera.
+  function addHiddenRepeats(items) {
+    var pct = +settings.repeatPct || 0;
+    if (pct <= 0 || items.length < 5) return items;
+    var n = Math.max(1, Math.round(items.length * pct / 100));
+    // repeat photos from the first 70% of the set, shown again at least 3 photos later
+    var picks = shuffle(items.slice(0, Math.ceil(items.length * 0.7))).slice(0, n);
+    var out = items.slice();
+    picks.forEach(function (it) {
+      var lo = Math.min(out.length, out.indexOf(it) + 4);
+      out.splice(lo + Math.floor(Math.random() * (out.length - lo + 1)), 0, { name: it.name, blob: it.blob, repeat: true });
+    });
+    return out;
+  }
+
+  // Photos are copied into the app (at the size it scores, 2048 px) so the set
+  // survives the phone locking, the app closing or the battery dying.
   $("batchInput").addEventListener("change", function (ev) {
     userActed = true;
     var files = Array.prototype.slice.call(ev.target.files || []);
@@ -438,15 +459,38 @@
     if (!files.length) return;
     if (settings.shuffle) shuffle(files);
     else files.sort(function (a, b) { return natural(a.name, b.name); });
-    batch = { active: true, queue: files, total: files.length, pos: 0, done: 0 };
-    nextInQueue();
+    batch.active = false;
+    analyzeState("busy");
+    var items = [], k = 0;
+    (function prepNext() {
+      if (k >= files.length) return startSet(items);
+      var f = files[k++];
+      busyText("Preparing your set…", "Photo " + k + " of " + files.length + ". Kept on this phone until the set is done.");
+      decode(f).then(function (bmp) {
+        return canvasBlob(toImageData(bmp, MAX_ANALYSIS_SIDE), MAX_ANALYSIS_SIDE);
+      }).then(function (blob) { items.push({ name: f.name || ("photo-" + k + ".jpg"), blob: blob, repeat: false }); },
+        function () { toast("Skipped " + (f.name || "a photo") + ": it could not be opened"); })
+        .then(function () { setTimeout(prepNext, 0); });
+    })();
   });
+  function startSet(items) {
+    if (!items.length) { analyzeState("capture"); toast("None of these photos could be opened"); return; }
+    var full = addHiddenRepeats(items);
+    var meta = { total: full.length, next: 0, done: 0, rater: settings.rater || "", startedAt: new Date().toISOString() };
+    Sets.save(meta, full).catch(function () { toast("Not enough space to keep the set; it works until the app is closed"); });
+    batch = { active: true, queue: full.slice(), total: full.length, pos: 0, done: 0, startedAt: meta.startedAt, item: null };
+    $("resumeCard").hidden = true;
+    nextInQueue();
+  }
   function nextInQueue() {
     if (!batch.active) return;
-    var f = batch.queue.shift();
-    if (!f) {
+    // Remember how far the set has got: a photo counts once it is saved, skipped or failed
+    Sets.update({ total: batch.total, next: batch.pos, done: batch.done, rater: settings.rater || "", startedAt: batch.startedAt }).catch(function () {});
+    var it = batch.queue.shift();
+    if (!it) {
       batch.active = false;
       current = null;
+      Sets.clear().catch(function () {});
       $("savedTitle").textContent = "Set finished";
       $("savedText").textContent = batch.done + " of " + batch.total + " photos rated and saved.";
       $("nextPlotBtn").hidden = true;
@@ -454,8 +498,38 @@
       return;
     }
     batch.pos++;
-    handleFile(f, f.name || ("photo-" + batch.pos + ".jpg"), false, false);
+    batch.item = it;
+    handleFile(it.blob, it.name || ("photo-" + batch.pos + ".jpg"), false, false);
   }
+
+  // A set that was interrupted is offered on the home screen
+  function refreshResume() {
+    if (batch.active) { $("resumeCard").hidden = true; return; }
+    Sets.meta().then(function (m) {
+      var show = !!(m && m.next < m.total);
+      $("resumeCard").hidden = !show;
+      if (!show) return;
+      $("resumeTitle").textContent = "Continue your set at photo " + (m.next + 1) + " of " + m.total;
+      $("resumeText").textContent = m.done + " rated so far" + (m.rater ? " by " + m.rater : "") + ", started " +
+        new Date(m.startedAt).toLocaleDateString([], { day: "numeric", month: "short" }) + ".";
+      delete $("resumeDiscard").dataset.armed;
+      $("resumeDiscard").textContent = "Discard set";
+    }).catch(function () { $("resumeCard").hidden = true; });
+  }
+  $("resumeGo").addEventListener("click", function () {
+    Promise.all([Sets.meta(), Sets.items()]).then(function (r) {
+      var m = r[0], items = r[1];
+      if (!m || !items.length) { refreshResume(); return; }
+      batch = { active: true, queue: items.slice(m.next), total: m.total, pos: m.next, done: m.done, startedAt: m.startedAt, item: null };
+      $("resumeCard").hidden = true;
+      nextInQueue();
+    });
+  });
+  $("resumeDiscard").addEventListener("click", function () {
+    var b = $("resumeDiscard");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to discard"; return; }
+    Sets.clear().then(function () { $("resumeCard").hidden = true; toast("Set discarded. Saved ratings are kept."); });
+  });
 
   // After the rating is locked: show rater vs app, keep the rating fixed
   function renderRating() {
@@ -488,10 +562,13 @@
   }
   function findLeaf(data) {
     busyText("Finding the leaf…", "Separating the leaf from the background");
-    var bm = E.boardMask(data.data, data.width, data.height);
-    if (bm.boardLike) {
-      return Promise.resolve({ found: { roi: bm.roi, method: "board", labels: bm.labels, leafCount: bm.leafCount } });
-    }
+    // Same leaf finding as the Python analyzer (leaffind.js): any uniform background,
+    // labels / tape / glare dropped, only leaf-shaped pieces kept
+    var lf = window.BLSLeafFind ? window.BLSLeafFind.segment(data.data, data.width, data.height) : null;
+    var bgFound = lf && lf.mask ? { roi: lf.mask, method: "background", labels: lf.labels, leafCount: lf.leafCount, info: lf.info } : null;
+    if (bgFound && lf.confident) return Promise.resolve({ found: bgFound });
+    // Background only partly uniform or the piece is not leaf-shaped: the AI leaf finder
+    // decides, and the background result is kept as the fallback (as in the Python analyzer)
     return getSeg().then(function (m) {
       if (!m.isLoaded()) busyText("Getting the leaf finder ready…", "First time only: downloading about 25 MB, then it works offline");
       return m.load(function (f) { busyText("Getting the leaf finder ready…", "First time only: downloading " + Math.round(f * 100) + "% of 25 MB"); })
@@ -503,10 +580,12 @@
         .then(function (h) { return m.autoMask(h, data); });
     }).then(function (a) {
       if (a) { noteFinder(null); return { found: { roi: a.roi, method: "auto", points: a.points || [a.point] } }; }
+      if (bgFound) return { found: bgFound };
       // Never score a field photo whole: ask the person instead
       return { manual: true, reason: "The app couldn't find a single leaf in this photo." };
     }, function (e) {
       noteFinder(e);
+      if (bgFound) return { found: bgFound };
       return { manual: true, reason: "The automatic leaf finder couldn't run on this phone (" + (e && e.message ? e.message : "error") + ")." };
     });
   }
@@ -714,7 +793,7 @@
     }
     var L = r.lesions;
     $("lesionLine").innerHTML = L && L.count ? "<b>" + L.count + "</b> lesion" + (L.count === 1 ? "" : "s") + " · average size <b>" + L.meanSizePct.toFixed(2) + "%</b> of leaf · largest <b>" + L.largestPct.toFixed(1) + "%</b>" : "";
-    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
+    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ background: "Leaf separated from the background automatically (labels and glare left out)", board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
       "auto + taps": "Leaf found automatically, adjusted by you", traced: "Leaf outlined by you", "whole photo": "Whole photo scored as leaf", mixed: "Sections separated in different ways" })[r.segmentation] || "";
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
@@ -799,6 +878,7 @@
       rateSeconds: pendingRating ? pendingRating.seconds : "",
       ratedAt: pendingRating ? pendingRating.ratedAt : "",
       setPosition: pendingRating ? pendingRating.position : (batch.active ? batch.pos + "/" + batch.total : ""),
+      hiddenRepeat: !!(batch.active && batch.item && batch.item.repeat),
       deviceId: settings.deviceId || ""
     };
     if (pendingRating && !meta.rater) meta.rater = pendingRating.rater;
@@ -885,7 +965,7 @@
       Visual_Diseased_Percent: m.visualPct === 0 ? 0 : (m.visualPct || ""),
       Rating_Mode: m.ratingMode || (m.visualScore ? "after app score" : ""),
       Rating_Seconds: m.rateSeconds || "", Rated_At: m.ratedAt || "", Set_Position: m.setPosition || "",
-      Device_ID: m.deviceId || ""
+      Device_ID: m.deviceId || "", Hidden_Repeat: m.hiddenRepeat ? "yes" : ""
     };
   }
 
@@ -1235,6 +1315,7 @@
     $("dRater").value = settings.rater || "";
     $("dPhotos").checked = !!settings.uploadPhotos;
     $("dShuffle").checked = !!settings.shuffle;
+    $("dRepeat").value = String(settings.repeatPct == null ? 15 : settings.repeatPct);
     renderTeamUsers();
     $("destStatus").textContent = "";
     renderPlotSettings();
@@ -1323,9 +1404,10 @@
   settings.blind = true;
   $("saveStudy").addEventListener("click", function () {
     settings.shuffle = $("dShuffle").checked;
+    settings.repeatPct = +$("dRepeat").value || 0;
     Settings.save(settings);
     renderQr(); updateStudyLine();
-    toast(settings.shuffle ? "Photo sets come in random order" : "Photo sets come in name order");
+    toast((settings.shuffle ? "Random order" : "Name order") + ", " + (settings.repeatPct ? settings.repeatPct + "% hidden repeats" : "no hidden repeats") + " in photo sets");
   });
   function updateStudyLine() {
     $("studyLineText").textContent = (settings.shuffle ? "Pick many photos; they come one by one in random order" : "Pick many photos; they come one by one in name order") +
@@ -1338,7 +1420,7 @@
   function unb64url(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); return decodeURIComponent(escape(atob(s))); }
 
   function setupLink() {
-    var payload = { v: 1, d: settings.destination, c: settings.connectors[settings.destination] || {}, t: settings.trial, p: settings.uploadPhotos, b: !!settings.blind, s: !!settings.shuffle };
+    var payload = { v: 1, d: settings.destination, c: settings.connectors[settings.destination] || {}, t: settings.trial, p: settings.uploadPhotos, b: !!settings.blind, s: !!settings.shuffle, h: +settings.repeatPct || 0 };
     if (settings.palette && taughtModel) { payload.k = packPalette(settings.palette); payload.r = settings.rules; }
     return location.origin + location.pathname + "#setup-" + b64url(JSON.stringify(payload));
   }
@@ -1384,6 +1466,7 @@
       if (cfg.t) settings.trial = cfg.t;
       if (typeof cfg.p === "boolean") settings.uploadPhotos = cfg.p;
       if (typeof cfg.s === "boolean") settings.shuffle = cfg.s;
+      if (typeof cfg.h === "number") settings.repeatPct = cfg.h;
       updateStudyLine();
       Settings.save(settings); updateHeader(); refreshPending(); card.remove();
       toast("Joined. Records now go to " + conn.name);
@@ -1402,7 +1485,7 @@
   var samCache = new WeakMap();   // imageData -> image embedding, so re-opening is instant
 
   function segLabel(v) {
-    return { "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
+    return { "background": "Separated from the background automatically", "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
       "traced": "Outline traced by hand", "mixed": "Mixed methods", "black board": "Black board" }[v] || v || "Black board";
   }
   function getSeg() { return segModule ? Promise.resolve(segModule) : import("./segment.js").then(function (m) { return (segModule = m); }); }
@@ -2522,6 +2605,7 @@
   // The rating app opens on the camera panel only: no example result. New people get the
   // 3-step guide after they enter their name (see startAs); people who had a name already see it once here.
   if (settings.rater && !settings.guideSeen) openGuide();
+  refreshResume();
 
   if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
     try {

@@ -611,6 +611,7 @@ h3 { font: 750 17px/1.25 var(--font-display); font-stretch: 88%; letter-spacing:
   78% { transform: translateY(6px) scale(0.995); }
   100% { transform: none; }
 }
+.splash-by { display: block; text-align: center; margin-top: 4px; color: var(--board-ink-2); font: 500 12.5px var(--font-body); opacity: 0.8; animation: splashFade 0.5s ease 0.7s both; }
 @keyframes splashFade { from { opacity: 0; } to { opacity: 1; } }
 /* the welcome leaf's streaks wait until the splash has gone, so the two moments come one after the other */
 body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
@@ -621,6 +622,12 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
 .lab-credit b { color: var(--board-ink); }
 .lab-chip { flex: none; background: #fff; border-radius: 14px; padding: 5px; }
 .lab-chip img { width: 72px; height: auto; display: block; }
+
+/* ---- resume an interrupted photo set ---- */
+.resume-card { border: 2px solid var(--straw); }
+.solo-note { background: var(--surface-2); }
+.resume-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.resume-actions .btn { min-height: 52px; }
 
 /* ---- how to rate: 3-step guide ---- */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -659,6 +666,7 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
   <div>
     <div class="splash-logo"><img src="icons/ameen-lab-logo.png" alt="" onerror="var s=document.getElementById('splash');if(s)s.remove()"></div>
     <span class="splash-app">BLS Leaf Scorer</span>
+    <span class="splash-by">Developed by Tapish Pawar</span>
   </div>
 </div>
 <script>
@@ -702,6 +710,14 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       <div class="install-actions">
         <button class="btn btn-primary" type="button" id="installBtn" hidden>Install app</button>
         <button class="btn btn-ghost" type="button" id="installLater">Not now</button>
+      </div>
+    </div>
+
+    <div class="card resume-card" id="resumeCard" hidden>
+      <div><h3 id="resumeTitle">Continue your set</h3><p class="small muted" id="resumeText" style="margin:2px 0 0"></p></div>
+      <div class="resume-actions">
+        <button class="btn btn-primary" type="button" id="resumeGo">Continue set</button>
+        <button class="btn btn-ghost" type="button" id="resumeDiscard">Discard set</button>
       </div>
     </div>
 
@@ -973,6 +989,10 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
   <!-- SETTINGS -->
   <section class="view" id="view-settings" aria-label="Settings" hidden>
     <div><div class="eyebrow">Your data, your storage</div><h2>Where records are saved</h2></div>
+    <div class="card solo-note">
+      <h3>Rating on your own?</h3>
+      <p class="small" style="margin:0">Nothing to set up. Your ratings and photos stay on this phone. To share them, use <b>Records → Export CSV</b> for a spreadsheet, or <b>Back up</b> below for everything including photos. Joining a team is optional.</p>
+    </div>
     <div class="card">
       <p class="small muted" style="margin:0">Every record is saved on this phone first. Choose where copies go when you're online. The app has no server of its own: data goes straight from this phone to the storage you choose.</p>
       <div class="dest-list" id="destList"></div>
@@ -999,6 +1019,10 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       <h3>Rating mode</h3>
       <p class="small" style="margin:0">Every leaf is rated by eye first. The app shows its score only after the rating is locked.</p>
       <label class="check"><input id="dShuffle" type="checkbox" checked> Show a set of photos in random order</label>
+      <div class="field"><label for="dRepeat">Hidden repeats in a photo set</label>
+        <select id="dRepeat"><option value="0">None</option><option value="10">10% of the set</option><option value="15">15% of the set</option><option value="20">20% of the set</option></select>
+        <span class="hint">Some photos of a set come back later, unannounced, to measure how consistently each person rates. Photos taken with the camera are never repeated.</span>
+      </div>
       <p class="small muted" style="margin:0">Each record keeps the rater ID, the rater's 1–9 score and %, how long the rating took, and the app's score, so rater and app can be compared later. This setting is shared with your team through the setup link.</p>
       <button class="btn btn-soft" type="button" id="saveStudy">Save</button>
     </div>
@@ -1037,8 +1061,8 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
     </div>
 
     <div class="card">
-      <h3>Set up a team</h3>
-      <p class="small muted" style="margin:0">Team members scan this code with their phone camera to open the app with the same storage, trial and settings. Keys are included, so only share it with your team.</p>
+      <h3>Set up a team <span class="muted" style="font-weight:500">(optional, for organisers)</span></h3>
+      <p class="small muted" style="margin:0">Only needed when several people send ratings to one shared Google Sheet. Team members scan this code with their phone camera to open the app with the same storage, trial and settings. Keys are included, so only share it with your team.</p>
       <div class="qr-box">
         <div id="qr" aria-label="Team setup QR code"></div>
         <div style="display:grid;gap:8px;min-width:0">
@@ -1141,7 +1165,7 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
     <span class="status-line err" id="wErr" role="alert"></span>
     <button class="btn btn-primary" type="submit" id="wStart">Start</button>
     <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
-    <div class="lab-credit"><span class="lab-chip"><img src="icons/ameen-lab-logo.png" alt="" onerror="this.closest('.lab-credit').remove()"></span><span>Made by <b>Ameen Lab</b><br>Plant Pathology</span></div>
+    <div class="lab-credit"><span class="lab-chip"><img src="icons/ameen-lab-logo.png" alt="" onerror="this.closest('.lab-credit').remove()"></span><span>Developed by <b>Tapish Pawar</b><br>Ameen Lab, Plant Pathology</span></div>
   </form>
 </div>
 
@@ -1204,6 +1228,7 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
 <script src="vendor/qrcode.js"></script>
 <script src="vendor/jszip.min.js"></script>
 <script src="engine.js"></script>
+<script src="leaffind.js"></script>
 <script src="store.js"></script>
 <script src="connectors/connectors.js"></script>
 <script src="app.js"></script>

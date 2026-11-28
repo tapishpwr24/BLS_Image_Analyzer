@@ -29,7 +29,7 @@
     "Lesion_Count", "Mean_Lesion_Size_Percent", "Visual_BLS_Score",
     // Study mode: the rater's own estimate, made before the app's score was shown
     "Visual_Diseased_Percent", "Rating_Mode", "Rating_Seconds", "Rated_At", "Set_Position",
-    "Device_ID"
+    "Device_ID", "Hidden_Repeat"
   ];
 
   function postJson(url, body, headers, plain) {
