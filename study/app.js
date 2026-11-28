@@ -12,7 +12,7 @@
   var APP_VERSION = "0.13.0";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
-  var USAGE_URL = "";
+  var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
