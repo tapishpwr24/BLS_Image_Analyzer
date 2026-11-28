@@ -626,6 +626,21 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
 /* ---- resume an interrupted photo set ---- */
 .resume-card { border: 2px solid var(--straw); }
 .solo-note { background: var(--surface-2); }
+.sheet-cta { border: 1.5px solid var(--accent); }
+.sheet-cta .btn { width: 100%; }
+
+/* ---- guided Google Sheet setup ---- */
+.sw-step { display: grid; gap: 12px; animation: gIn 0.28s ease; }
+.sw-step h3 { font: 800 30px/1.04 var(--font-display); font-stretch: 70%; letter-spacing: -0.015em; }
+.sw-step p { margin: 0; font-size: 16px; line-height: 1.55; }
+.sw-step .g-tip { font-size: 14px; color: var(--ink-2); padding-left: 12px; border-left: 3px solid var(--straw); }
+.sw-list { margin: 0; padding-left: 22px; display: grid; gap: 8px; font-size: 15.5px; line-height: 1.5; }
+.sw-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.sw-row input, .sw-step textarea { width: 100%; font: 500 13px var(--font-body); padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.sw-wide { width: 100%; min-height: 54px; }
+.sw-manual summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; }
+.sw-manual textarea { margin-top: 8px; font-family: var(--font-data); font-size: 11.5px; }
+#swDots i { transition: width 0.2s, background-color 0.2s; }
 .resume-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .resume-actions .btn { min-height: 52px; }
 
@@ -993,6 +1008,13 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
       <h3>Rating on your own?</h3>
       <p class="small" style="margin:0">Nothing to set up. Your ratings and photos stay on this phone. To share them, use <b>Records → Export CSV</b> for a spreadsheet, or <b>Back up</b> below for everything including photos. Joining a team is optional.</p>
     </div>
+    <div class="card sheet-cta">
+      <div>
+        <h3>Send ratings and photos to Google Sheets</h3>
+        <p class="small muted" style="margin:2px 0 0">Your own Sheet, or the team leader's: rows in the Sheet, photos in Google Drive. A guided setup takes about 5 minutes, once, on a computer.</p>
+      </div>
+      <button class="btn btn-primary" type="button" id="openSheetWizard">Connect a Google Sheet</button>
+    </div>
     <div class="card">
       <p class="small muted" style="margin:0">Every record is saved on this phone first. Choose where copies go when you're online. The app has no server of its own: data goes straight from this phone to the storage you choose.</p>
       <div class="dest-list" id="destList"></div>
@@ -1167,6 +1189,76 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
     <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
     <div class="lab-credit"><span class="lab-chip"><img src="icons/ameen-lab-logo.png" alt="" onerror="this.closest('.lab-credit').remove()"></span><span>Developed by <b>Tapish Pawar</b><br>Ameen Lab, Plant Pathology</span></div>
   </form>
+</div>
+
+<div class="guide" id="sheetWizard" hidden role="dialog" aria-modal="true" aria-label="Connect a Google Sheet">
+  <div class="guide-card">
+    <div class="guide-top"><span id="swCount">Step 1 of 5</span><button type="button" class="link-btn" id="swClose">Close</button></div>
+
+    <section class="sw-step">
+      <h3>Do this once, on a computer</h3>
+      <p>Ratings and photos will go to the Google account you use here. In a team, the <b>team leader</b> does this; members then just scan a QR code. Working alone? Use your own account.</p>
+      <p id="swWhere" class="g-tip"></p>
+      <div class="sw-row" id="swLinkRow">
+        <input id="swAppLink" type="text" readonly aria-label="App link">
+        <button class="btn btn-soft" type="button" id="swCopyLink">Copy link</button>
+      </div>
+      <p class="g-tip">You need a Google account. Google's script editor does not work in the phone apps, which is why a computer is needed for this one step.</p>
+    </section>
+
+    <section class="sw-step" hidden>
+      <h3>Create a Google Sheet</h3>
+      <p>Open a new, empty Google Sheet and give it a name, for example <b>BLS ratings 2026</b>.</p>
+      <a class="btn btn-primary sw-wide" href="https://sheets.new" target="_blank" rel="noopener">Open a new Google Sheet</a>
+      <p class="g-tip">Ratings will arrive in a tab called <b>BLS_results</b>, the people using the app in a tab called <b>Users</b>, and photos in a Drive folder called <b>BLS Leaf Scorer photos</b>.</p>
+    </section>
+
+    <section class="sw-step" hidden>
+      <h3>Paste the script</h3>
+      <ol class="sw-list">
+        <li>In the Sheet, open <b>Extensions → Apps Script</b>.</li>
+        <li>Delete everything in the editor.</li>
+        <li>Tap <b>Copy script</b> below and paste it into the editor.</li>
+        <li>Click the <b>Save</b> icon.</li>
+      </ol>
+      <button class="btn btn-primary sw-wide" type="button" id="swCopyScript">Copy script</button>
+      <span class="status-line" id="swScriptStatus" role="status"></span>
+      <p class="g-tip">Your team key, <b id="swKey" class="num"></b>, is already inside the script. It stops strangers from writing to your Sheet. Nothing needs editing.</p>
+      <details class="sw-manual"><summary>Copy button not working?</summary><textarea id="swScriptText" readonly rows="6" aria-label="Script"></textarea></details>
+    </section>
+
+    <section class="sw-step" hidden>
+      <h3>Publish it</h3>
+      <ol class="sw-list">
+        <li>Click <b>Deploy → New deployment</b>.</li>
+        <li>Click the gear next to "Select type" and choose <b>Web app</b>.</li>
+        <li>Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
+        <li>Click <b>Authorize access</b> and choose your account. If Google says it hasn't verified the app, click <b>Advanced</b>, then <b>Go to … (unsafe)</b>, then <b>Allow</b>. This is your own script in your own account.</li>
+        <li>Copy the <b>Web app URL</b>. It ends in <b>/exec</b>.</li>
+      </ol>
+    </section>
+
+    <section class="sw-step" hidden>
+      <h3>Connect the app</h3>
+      <p>Paste the Web app URL, then test the connection.</p>
+      <input id="swUrl" class="input-lg" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="btn btn-soft sw-wide" type="button" id="swTest">Test connection</button>
+      <span class="status-line" id="swStatus" role="status"></span>
+    </section>
+
+    <section class="sw-step" hidden>
+      <h3>Connected</h3>
+      <p id="swDoneText">New ratings, photos and thumbnails now go to your Google Sheet when this device is online.</p>
+      <p class="g-tip">Working as a team? Under <b>Set up a team</b>, show the QR code. Members scan it and tap <b>Join team</b>, and their ratings go to this Sheet too.</p>
+      <button class="btn btn-soft sw-wide" type="button" id="swShowQr">Show the team QR code</button>
+    </section>
+
+    <div class="guide-foot">
+      <button class="btn btn-ghost" type="button" id="swBack">Back</button>
+      <div class="g-dots" aria-hidden="true" id="swDots"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+      <button class="btn btn-primary" type="button" id="swNext">Next</button>
+    </div>
+  </div>
 </div>
 
 <div class="guide" id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="gTitle">
