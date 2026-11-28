@@ -1,14 +1,14 @@
 {
   "name": "BLS Leaf Scorer",
   "short_name": "BLS Scorer",
-  "description": "Photograph a leaf, get its BLS score and diseased leaf area, and save it to your own storage.",
+  "description": "Rate bacterial leaf streak on wheat leaves by eye, then compare with the app's image score. Saves to your own storage.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f3f5ef",
-  "theme_color": "#16301f",
+  "background_color": "#e5ece7",
+  "theme_color": "#0e2318",
   "icons": [
     { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },

@@ -9,7 +9,10 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.9.2";
+  var APP_VERSION = "1.0.0";
+  // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
+  // Empty = nothing is sent. See privacy.html for exactly what is counted.
+  var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -73,11 +76,13 @@
   // Analyze screen has four states: capture, busy, result, saved
   function analyzeState(state) {
     $("capture").hidden = !(state === "capture" || state === "example");
+    $("rate").hidden = state !== "rate";
     $("busy").hidden = state !== "busy";
     $("result").hidden = !(state === "result" || state === "example");
     $("savedCard").hidden = state !== "saved";
     $("errorCard").hidden = state !== "error";
     if (state === "error") $("capture").hidden = false;
+    if (state === "capture" || state === "saved") refreshResume(); else $("resumeCard").hidden = true;
   }
 
   // ---------- image loading ----------
@@ -172,13 +177,32 @@
 
   function handleFile(blob, name, isSample, asExample, append) {
     var appending = !!(append && current);
+    // Study mode: the rater scores the original photo before the app scores it
+    var blindNow = !!settings.blind && !isSample && !asExample && !appending;
     if (appending) $("busy").hidden = false; else analyzeState("busy");
     if (!isSample && !appending) requestGps();
     if (!appending) window.scrollTo(0, 0);
+    if (!appending) pendingRating = null;
     // Let the spinner paint before the pixel loop runs
     setTimeout(function () {
       decode(blob).then(function (bmp) {
         var data = toImageData(bmp, MAX_ANALYSIS_SIDE);
+        if (!blindNow) return scorePhoto(data);
+        return askRating(data, name).then(function (locked) {
+          if (!locked) return;
+          analyzeState("busy");
+          window.scrollTo(0, 0);
+          return new Promise(function (res) { setTimeout(res, 30); }).then(function () { return scorePhoto(data); });
+        });
+      }).catch(function (e) {
+        $("busy").hidden = true;
+        if (appending) { toast("That photo could not be read. Try again."); return; }
+        $("errorText").textContent = (e && e.message) || "The photo could not be read. Try again.";
+        analyzeState("error");
+      });
+    }, 30);
+
+    function scorePhoto(data) {
         return (isSample ? Promise.resolve({ found: null }) : findLeaf(data)).then(function (step) {
           if (asExample && userActed) return { cancelled: true, stale: true };
           $("busy").hidden = true;
@@ -190,14 +214,17 @@
           if (step.stale || (asExample && userActed)) return;
           if (step.cancelled) {
             if (!appending) { analyzeState("capture"); current = null; }
+            if (pendingRating) { pendingRating = null; toast("Rating not saved: the leaf was not marked."); if (batch.active) nextInQueue(); }
             return;
           }
           var sec = analyzeSection({ name: name, imageData: data }, found);
           if (!sec.result.ok) {
             if (appending) { toast(sec.result.message); return; }
-            $("errorText").textContent = sec.result.message;
+            $("errorText").textContent = sec.result.message + (pendingRating ? " Your rating was not saved." : "");
             analyzeState("error");
             current = null;
+            pendingRating = null;
+            if (batch.active) setTimeout(nextInQueue, 1800);
             return;
           }
           if (appending) current.sections.push(sec);
@@ -208,13 +235,321 @@
           if (!asExample) buzz(25);
           if (appending) toast("Section " + current.sections.length + " added. Score updated for the whole leaf.");
         });
-      }).catch(function (e) {
-        $("busy").hidden = true;
-        if (appending) { toast("That photo could not be read. Try again."); return; }
-        $("errorText").textContent = (e && e.message) || "The photo could not be read. Try again.";
-        analyzeState("error");
-      });
-    }, 30);
+    }
+  }
+
+  // ---------- study mode: blind rating before the app scores ----------
+  var pendingRating = null;   // { score, pct, rater, plot, seconds, ratedAt, position }
+  var rateResolve = null, rateStarted = 0, rateScore = null;
+  var batch = { active: false, queue: [], total: 0, pos: 0, done: 0 };
+
+  (function () {
+    var html = "";
+    for (var k = 1; k <= 9; k++) html += '<button type="button" role="radio" aria-checked="false" data-rs="' + k + '" style="background:' + scoreColor(k) + '">' + k + "</button>";
+    $("rRuler").innerHTML = html;
+  })();
+  function setRate(k) {
+    rateScore = k;
+    document.querySelectorAll("#rRuler button").forEach(function (b) { b.setAttribute("aria-checked", String(+b.dataset.rs === k)); });
+  }
+  $("rRuler").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-rs]");
+    if (!b) return;
+    setRate(rateScore === +b.dataset.rs ? null : +b.dataset.rs);
+    $("rateErr").textContent = "";
+    buzz(8);
+  });
+  // ---------- phone data entry ----------
+  // % by tapping: chips for the usual estimates, −1/+1 to fine-tune; typing is optional
+  var PCT_CHIPS = [0, 1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90];
+  $("pctChips").innerHTML = PCT_CHIPS.map(function (v) { return '<button type="button" data-v="' + v + '" aria-pressed="false">' + v + "</button>"; }).join("");
+  function readPct() { var t = $("rPct").value.trim().replace(",", "."); return t === "" ? "" : parseFloat(t); }
+  function markChips() {
+    var cur = readPct();
+    $("pctChips").querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(cur !== "" && +b.dataset.v === cur)); });
+  }
+  function setPct(v) {
+    if (v === "" || v == null || !isFinite(v)) { $("rPct").value = ""; }
+    else { v = Math.max(0, Math.min(100, Math.round(v * 10) / 10)); $("rPct").value = String(v); }
+    markChips();
+    $("rateErr").textContent = "";
+  }
+  $("pctChips").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-v]"); if (!b) return;
+    setPct(+b.dataset.v); buzz(8);
+  });
+  document.querySelectorAll("[data-pct]").forEach(function (b) {
+    b.addEventListener("click", function () { var c = readPct(); setPct((c === "" ? 0 : c) + (+b.dataset.pct)); buzz(6); });
+  });
+  $("rPct").addEventListener("input", markChips);   // typing is left as typed (e.g. "12.5")
+
+  // Plant ID: step the number in the ID up or down (P-0099 → P-0100), keeps zero padding
+  function stepId(id, d) {
+    id = String(id || "");
+    if (d > 0) { var np = nextPlotAfter(id); if (np) return np.plot; }
+    var m = /^(.*?)(\d+)(\D*)$/.exec(id);
+    if (!m) return id;
+    var n = Math.max(0, parseInt(m[2], 10) + d), s = String(n);
+    while (s.length < m[2].length) s = "0" + s;
+    return m[1] + s + m[3];
+  }
+  // The specimen label under the photo follows the plant ID as it is typed or stepped
+  function updateSpecLabel() {
+    $("specPlot").textContent = $("rPlot").value.trim() || "–";
+    var d = new Date().toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+    $("specMeta").textContent = (settings.rater ? "Rated by " + settings.rater + ", " : "") + d;
+  }
+  $("rPlot").addEventListener("input", updateSpecLabel);
+  $("idUp").addEventListener("click", function () { $("rPlot").value = stepId($("rPlot").value, 1); updateSpecLabel(); buzz(6); });
+  $("idDown").addEventListener("click", function () { $("rPlot").value = stepId($("rPlot").value, -1); updateSpecLabel(); buzz(6); });
+  // Number pad or full keyboard for IDs, remembered on this phone
+  function applyIdKeyboard() {
+    var num = !!settings.idNumeric;
+    $("rPlot").setAttribute("inputmode", num ? "numeric" : "text");
+    $("idKb").textContent = num ? "Use letter keyboard" : "Use number pad";
+  }
+  $("idKb").addEventListener("click", function () {
+    settings.idNumeric = !settings.idNumeric; Settings.save(settings); applyIdKeyboard();
+    var i = $("rPlot"); i.blur(); setTimeout(function () { i.focus(); }, 60);
+  });
+  applyIdKeyboard();
+
+  // "Done" on the phone keyboard closes it
+  ["rPlot", "rPct"].forEach(function (id) {
+    $(id).addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); ev.target.blur(); } });
+  });
+  // While typing, the bottom tab bar steps aside so the keyboard does not cover the fields
+  document.addEventListener("focusin", function (ev) {
+    if (ev.target.matches && ev.target.matches("input[type=text], input[type=number], input:not([type]), textarea")) document.body.classList.add("typing");
+  });
+  document.addEventListener("focusout", function () { setTimeout(function () {
+    var a = document.activeElement;
+    if (!a || !a.matches || !a.matches("input, textarea")) document.body.classList.remove("typing");
+  }, 50); });
+
+  // Scan the plant label (QR code or barcode) to fill in the ID. Android Chrome and
+  // Edge have a built-in barcode reader; elsewhere the button stays hidden.
+  var scan = null;
+  if ("BarcodeDetector" in window) $("idScan").hidden = false;
+  $("idScan").addEventListener("click", function () {
+    var det;
+    try { det = new window.BarcodeDetector(); } catch (e) { toast("Scanning is not available on this phone"); return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(function (stream) {
+      scan = { stream: stream, det: det, timer: null };
+      var v = $("scanVideo"); v.srcObject = stream; v.play();
+      $("scanner").hidden = false;
+      (function look() {
+        if (!scan) return;
+        det.detect(v).then(function (codes) {
+          if (!scan) return;
+          var c = codes && codes[0] && String(codes[0].rawValue || "").trim();
+          if (c) { $("rPlot").value = c.slice(0, 60); updateSpecLabel(); buzz([20, 40, 20]); closeScan(); toast("Plant ID: " + c.slice(0, 60)); return; }
+          scan.timer = setTimeout(look, 200);
+        }, function () { if (scan) scan.timer = setTimeout(look, 400); });
+      })();
+    }, function () { toast("Camera not allowed. Type the ID instead."); });
+  });
+  function closeScan() {
+    if (!scan) { $("scanner").hidden = true; return; }
+    clearTimeout(scan.timer);
+    scan.stream.getTracks().forEach(function (t) { t.stop(); });
+    scan = null;
+    $("scanVideo").srcObject = null;
+    $("scanner").hidden = true;
+  }
+  $("scanClose").addEventListener("click", closeScan);
+  var lastRatedPlot = "";
+
+  function drawPhoto(canvas, frame, data) {
+    var rotate = data.height > data.width * 1.6;
+    var tmp = document.createElement("canvas");
+    tmp.width = data.width; tmp.height = data.height;
+    tmp.getContext("2d").putImageData(data, 0, 0);
+    canvas.width = rotate ? data.height : data.width;
+    canvas.height = rotate ? data.width : data.height;
+    var ctx = canvas.getContext("2d");
+    if (rotate) { ctx.translate(canvas.width, 0); ctx.rotate(Math.PI / 2); }
+    ctx.drawImage(tmp, 0, 0);
+    frame.classList.toggle("tall", !rotate && data.height > data.width);
+    frame.classList.toggle("rot", rotate);
+    frame.scrollLeft = 0;
+  }
+  function stem(name) { return String(name || "").replace(/\.[^.]+$/, ""); }
+
+  function askRating(data, name) {
+    drawPhoto($("rateCanvas"), $("rateFrame"), data);
+    // The rater ID is asked once; after that it is shown, not asked again
+    $("rRater").value = settings.rater || $("fRater").value.trim() || "";
+    showRaterField(!$("rRater").value);
+    // In a photo set the ID is the file name; otherwise suggest the next ID after the last one
+    $("rPlot").value = batch.active ? stem(name) : (lastRatedPlot ? stepId(lastRatedPlot, 1) : $("fPlot").value.trim());
+    setRate(null);
+    setPct("");
+    updateSpecLabel();
+    $("rateErr").textContent = "";
+    $("rateProgress").textContent = batch.active ? "Photo " + batch.pos + " of " + batch.total + " · rate first" : "Rate first";
+    analyzeState("rate");
+    window.scrollTo(0, 0);
+    rateStarted = Date.now();
+    return new Promise(function (res) { rateResolve = res; });
+  }
+
+  function showRaterField(ask) {
+    $("rRaterField").hidden = !ask;
+    $("rRaterChip").hidden = ask;
+    $("rIdRow").classList.toggle("one", !ask);
+    $("rRaterName").textContent = $("rRater").value;
+  }
+  $("rRaterChange").addEventListener("click", function () { openWelcome(true); });
+
+  $("rateLock").addEventListener("click", function () {
+    var rater = $("rRater").value.trim(), plot = $("rPlot").value.trim();
+    var pct = readPct();
+    var err = !rater ? "Enter your rater ID." : !plot ? "Enter the plant or image ID." : !rateScore ? "Tap your 1–9 score." :
+      (pct !== "" && !(pct >= 0 && pct <= 100)) ? "Diseased area must be between 0 and 100%." : "";
+    if (err) { $("rateErr").textContent = err; buzz(40); return; }
+    pendingRating = {
+      score: rateScore, pct: pct === "" ? "" : Math.round(pct * 10) / 10, rater: rater, plot: plot,
+      seconds: Math.round((Date.now() - rateStarted) / 100) / 10, ratedAt: new Date().toISOString(),
+      position: batch.active ? batch.pos + "/" + batch.total : ""
+    };
+    // The save form picks these up; the rater ID is remembered for the next leaf
+    $("fPlot").value = plot; $("fRater").value = rater;
+    if (batch.active) $("fLeaf").value = "1"; else lastRatedPlot = plot;
+    settings.rater = rater; Settings.save(settings);
+    buzz(20);
+    var r = rateResolve; rateResolve = null;
+    if (r) r(true);
+  });
+  $("rateSkip").addEventListener("click", function () {
+    pendingRating = null;
+    var r = rateResolve; rateResolve = null;
+    if (r) r(false);
+    if (batch.active) nextInQueue(); else analyzeState("capture");
+  });
+
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  $("batchInput").addEventListener("click", function () { userActed = true; });
+  var Sets = window.BLSStore.Sets;
+
+  // Hidden repeats: a share of the set comes back later, unannounced, so each rater's
+  // consistency can be measured. Only in photo sets, never for photos taken with the camera.
+  function addHiddenRepeats(items) {
+    var pct = +settings.repeatPct || 0;
+    if (pct <= 0 || items.length < 5) return items;
+    var n = Math.max(1, Math.round(items.length * pct / 100));
+    // repeat photos from the first 70% of the set, shown again at least 3 photos later
+    var picks = shuffle(items.slice(0, Math.ceil(items.length * 0.7))).slice(0, n);
+    var out = items.slice();
+    picks.forEach(function (it) {
+      var lo = Math.min(out.length, out.indexOf(it) + 4);
+      out.splice(lo + Math.floor(Math.random() * (out.length - lo + 1)), 0, { name: it.name, blob: it.blob, repeat: true });
+    });
+    return out;
+  }
+
+  // Photos are copied into the app (at the size it scores, 2048 px) so the set
+  // survives the phone locking, the app closing or the battery dying.
+  $("batchInput").addEventListener("change", function (ev) {
+    userActed = true;
+    var files = Array.prototype.slice.call(ev.target.files || []);
+    ev.target.value = "";
+    if (!files.length) return;
+    if (settings.shuffle) shuffle(files);
+    else files.sort(function (a, b) { return natural(a.name, b.name); });
+    batch.active = false;
+    analyzeState("busy");
+    var items = [], k = 0;
+    (function prepNext() {
+      if (k >= files.length) return startSet(items);
+      var f = files[k++];
+      busyText("Preparing your set…", "Photo " + k + " of " + files.length + ". Kept on this phone until the set is done.");
+      decode(f).then(function (bmp) {
+        return canvasBlob(toImageData(bmp, MAX_ANALYSIS_SIDE), MAX_ANALYSIS_SIDE);
+      }).then(function (blob) { items.push({ name: f.name || ("photo-" + k + ".jpg"), blob: blob, repeat: false }); },
+        function () { toast("Skipped " + (f.name || "a photo") + ": it could not be opened"); })
+        .then(function () { setTimeout(prepNext, 0); });
+    })();
+  });
+  function startSet(items) {
+    if (!items.length) { analyzeState("capture"); toast("None of these photos could be opened"); return; }
+    var full = addHiddenRepeats(items);
+    var meta = { total: full.length, next: 0, done: 0, rater: settings.rater || "", startedAt: new Date().toISOString() };
+    Sets.save(meta, full).catch(function () { toast("Not enough space to keep the set; it works until the app is closed"); });
+    batch = { active: true, queue: full.slice(), total: full.length, pos: 0, done: 0, startedAt: meta.startedAt, item: null };
+    $("resumeCard").hidden = true;
+    nextInQueue();
+  }
+  function nextInQueue() {
+    if (!batch.active) return;
+    // Remember how far the set has got: a photo counts once it is saved, skipped or failed
+    Sets.update({ total: batch.total, next: batch.pos, done: batch.done, rater: settings.rater || "", startedAt: batch.startedAt }).catch(function () {});
+    var it = batch.queue.shift();
+    if (!it) {
+      batch.active = false;
+      current = null;
+      Sets.clear().catch(function () {});
+      $("savedTitle").textContent = "Set finished";
+      $("savedText").textContent = batch.done + " of " + batch.total + " photos rated and saved.";
+      $("nextPlotBtn").hidden = true;
+      analyzeState("saved");
+      return;
+    }
+    batch.pos++;
+    batch.item = it;
+    handleFile(it.blob, it.name || ("photo-" + batch.pos + ".jpg"), false, false);
+  }
+
+  // A set that was interrupted is offered on the home screen
+  function refreshResume() {
+    if (batch.active) { $("resumeCard").hidden = true; return; }
+    Sets.meta().then(function (m) {
+      var show = !!(m && m.next < m.total);
+      $("resumeCard").hidden = !show;
+      if (!show) return;
+      $("resumeTitle").textContent = "Continue your set at photo " + (m.next + 1) + " of " + m.total;
+      $("resumeText").textContent = m.done + " rated so far" + (m.rater ? " by " + m.rater : "") + ", started " +
+        new Date(m.startedAt).toLocaleDateString([], { day: "numeric", month: "short" }) + ".";
+      delete $("resumeDiscard").dataset.armed;
+      $("resumeDiscard").textContent = "Discard set";
+    }).catch(function () { $("resumeCard").hidden = true; });
+  }
+  $("resumeGo").addEventListener("click", function () {
+    Promise.all([Sets.meta(), Sets.items()]).then(function (r) {
+      var m = r[0], items = r[1];
+      if (!m || !items.length) { refreshResume(); return; }
+      batch = { active: true, queue: items.slice(m.next), total: m.total, pos: m.next, done: m.done, startedAt: m.startedAt, item: null };
+      $("resumeCard").hidden = true;
+      nextInQueue();
+    });
+  });
+  $("resumeDiscard").addEventListener("click", function () {
+    var b = $("resumeDiscard");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to discard"; return; }
+    Sets.clear().then(function () { $("resumeCard").hidden = true; toast("Set discarded. Saved ratings are kept."); });
+  });
+
+  // After the rating is locked: show rater vs app, keep the rating fixed
+  function renderRating() {
+    var cmp = $("cmpCard"), ruler = $("visRuler");
+    $("discardBtn").textContent = batch.active ? "Skip" : "Retake";
+    if (!pendingRating) { cmp.hidden = true; ruler.classList.remove("locked"); return; }
+    var p = pendingRating, r = current.result;
+    setVisual(p.score);
+    ruler.classList.add("locked");
+    $("visHint").textContent = "Rated blind by " + p.rater + " before the app's score was shown. Locked.";
+    var d = r.score - p.score;
+    cmp.innerHTML =
+      '<div class="cmp"><span class="eyebrow">' + esc(p.rater) + ', by eye</span><b class="num" style="color:' + scoreColor(p.score) + '">' + p.score + '</b><span class="small">' + (p.pct === "" ? "no % given" : fmtPct(p.pct) + " diseased") + "</span></div>" +
+      '<div class="cmp"><span class="eyebrow">App</span><b class="num" style="color:' + scoreColor(r.score) + '">' + r.score + '</b><span class="small">' + fmtPct(r.diseasedPct) + " diseased</span></div>" +
+      '<span class="small muted cmp-note">' + (d === 0 ? "Same score." : "The app scored " + Math.abs(d) + " " + (d > 0 ? "higher" : "lower") + ".") +
+      " Rating took " + p.seconds + " s. It is locked and saved with this record" + (batch.active ? " (" + p.position + ")" : "") + ".</span>";
+    cmp.hidden = false;
   }
 
   /*
@@ -230,10 +565,13 @@
   }
   function findLeaf(data) {
     busyText("Finding the leaf…", "Separating the leaf from the background");
-    var bm = E.boardMask(data.data, data.width, data.height);
-    if (bm.boardLike) {
-      return Promise.resolve({ found: { roi: bm.roi, method: "board", labels: bm.labels, leafCount: bm.leafCount } });
-    }
+    // Same leaf finding as the Python analyzer (leaffind.js): any uniform background,
+    // labels / tape / glare dropped, only leaf-shaped pieces kept
+    var lf = window.BLSLeafFind ? window.BLSLeafFind.segment(data.data, data.width, data.height) : null;
+    var bgFound = lf && lf.mask ? { roi: lf.mask, method: "background", labels: lf.labels, leafCount: lf.leafCount, info: lf.info } : null;
+    if (bgFound && lf.confident) return Promise.resolve({ found: bgFound });
+    // Background only partly uniform or the piece is not leaf-shaped: the AI leaf finder
+    // decides, and the background result is kept as the fallback (as in the Python analyzer)
     return getSeg().then(function (m) {
       if (!m.isLoaded()) busyText("Getting the leaf finder ready…", "First time only: downloading about 25 MB, then it works offline");
       return m.load(function (f) { busyText("Getting the leaf finder ready…", "First time only: downloading " + Math.round(f * 100) + "% of 25 MB"); })
@@ -245,10 +583,12 @@
         .then(function (h) { return m.autoMask(h, data); });
     }).then(function (a) {
       if (a) { noteFinder(null); return { found: { roi: a.roi, method: "auto", points: a.points || [a.point] } }; }
+      if (bgFound) return { found: bgFound };
       // Never score a field photo whole: ask the person instead
       return { manual: true, reason: "The app couldn't find a single leaf in this photo." };
     }, function (e) {
       noteFinder(e);
+      if (bgFound) return { found: bgFound };
       return { manual: true, reason: "The automatic leaf finder couldn't run on this phone (" + (e && e.message ? e.message : "error") + ")." };
     });
   }
@@ -280,7 +620,6 @@
     html += '<button class="add-sec solid" type="button" data-outline>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 19c3-1 4-6 7-9s6-3 7-5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="2"/></svg>' +
       "Adjust leaf edges" + (secs.length > 1 ? " (section " + secs.length + ")" : "") + "</button>";
-    html += '<button class="add-sec solid" type="button" data-teach><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 20c2-1 3-3 5-5l8-8a2 2 0 0 1 3 3l-8 8c-2 2-4 3-5 5z"/></svg>Teach colours</button>';
     html += '<label class="add-sec" for="secInput"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add section</label>';
     $("sections").innerHTML = html;
   }
@@ -318,6 +657,7 @@
   ["camInput", "fileInput"].forEach(function (id) {
     $(id).addEventListener("change", function (ev) {
       userActed = true;
+      batch.active = false;   // a single photo ends any set in progress
       var f = ev.target.files && ev.target.files[0];
       if (f) handleFile(f, f.name || ("leaf-" + Date.now() + ".jpg"), false, false);
       ev.target.value = "";
@@ -330,7 +670,199 @@
       .then(function (b) { handleFile(b, "BLS_02.jpg", true, asExample); })
       .catch(function () { analyzeState("capture"); toast("The example leaf could not be loaded."); });
   }
-  $("sampleBtn").addEventListener("click", function () { loadSample(false); });
+  $("sampleBtn").addEventListener("click", function () { openGuide(); });
+
+  // ---------- anonymous device count ----------
+  // Once a day per device: a random ID (not the rater's name or the team Device_ID),
+  // app version, platform, installed or browser, language and continent. Nothing else.
+  function usagePing() {
+    if (!USAGE_URL || settings.shareUsage === false || navigator.onLine === false) return;
+    var day = new Date().toISOString().slice(0, 10);
+    if (settings.usageDay === day) return;
+    // the random ID is kept for good, so a device is counted once however often it opens the app
+    if (!settings.usageId) { settings.usageId = uid(); Settings.save(settings); }
+    var ua = navigator.userAgent || "";
+    var platform = /iPhone|iPod/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "Mac" : /Linux|CrOS/.test(ua) ? "Linux" : "Other";
+    var region = "";
+    try { region = (Intl.DateTimeFormat().resolvedOptions().timeZone || "").split("/")[0]; } catch (e) { region = ""; }
+    var body = JSON.stringify({
+      t: "bls-usage-1", id: settings.usageId, v: APP_VERSION, p: platform,
+      m: isInstalled() ? "installed" : "browser", a: /\/study\//.test(location.pathname) ? "study" : "app",
+      l: (navigator.language || "").slice(0, 12), r: region
+    });
+    // A beacon needs no reply (the app's cross-origin isolation would block reading one)
+    // and is delivered even if the app is closed right away.
+    var sent = false;
+    try { sent = !!(navigator.sendBeacon && navigator.sendBeacon(USAGE_URL, new Blob([body], { type: "text/plain;charset=utf-8" }))); } catch (e) { sent = false; }
+    if (!sent) {
+      try { fetch(USAGE_URL, { method: "POST", mode: "no-cors", keepalive: true, headers: { "Content-Type": "text/plain;charset=utf-8" }, body: body }).catch(function () {}); sent = true; } catch (e) { sent = false; }
+    }
+    if (sent) { settings.usageDay = day; Settings.save(settings); }
+  }
+  $("dUsage").addEventListener("change", function () {
+    settings.shareUsage = $("dUsage").checked;
+    Settings.save(settings);
+    toast(settings.shareUsage ? "This device is counted anonymously" : "This device is no longer counted");
+  });
+
+  // ---------- guided Google Sheet setup ----------
+  // Walks the team leader (or a person working alone) through putting the
+  // receiver script into their own Google Sheet. The team key is generated
+  // here and written into the script, so nothing has to be edited by hand.
+  var sw = { step: 0, tested: false, script: "" };
+  function swKey() {
+    var d = settings.sheetDraft || {};
+    if (!d.key) {
+      var cur = settings.connectors && settings.connectors.googleSheets;
+      if (cur && cur.key) d.key = cur.key;
+      else {
+        var a = new Uint8Array(12); crypto.getRandomValues(a);
+        d.key = "bls-" + Array.prototype.map.call(a, function (b) { return (b % 36).toString(36); }).join("");
+      }
+      settings.sheetDraft = d; Settings.save(settings);
+    }
+    return d.key;
+  }
+  function isPhone() { return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ""); }
+  function showSwStep(i) {
+    var steps = document.querySelectorAll("#sheetWizard .sw-step"), last = steps.length - 1;
+    sw.step = Math.max(0, Math.min(last, i));
+    steps.forEach(function (s, k) { s.hidden = k !== sw.step; });
+    document.querySelectorAll("#swDots i").forEach(function (d, k) { d.classList.toggle("on", k === sw.step); });
+    $("swDots").style.visibility = sw.step === last ? "hidden" : "visible";
+    $("swCount").textContent = sw.step === last ? "All set" : "Step " + (sw.step + 1) + " of " + last;
+    $("swBack").style.visibility = sw.step && sw.step !== last ? "visible" : "hidden";
+    var next = $("swNext");
+    next.disabled = false;
+    next.textContent = sw.step === last ? "Done" : sw.step === last - 1 ? "Save and finish" : "Next";
+    if (sw.step === last - 1) next.disabled = !sw.tested;
+    if (sw.step === 2) prepareScript();
+  }
+  function prepareScript() {
+    var key = swKey();
+    $("swKey").textContent = key;
+    if (sw.script) return Promise.resolve(sw.script);
+    return fetch("connectors/google-sheets/Code.gs", { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) throw new Error();
+      return r.text();
+    }).then(function (t) {
+      sw.script = t.replace(/var TEAM_KEY = "[^"]*";/, 'var TEAM_KEY = "' + key + '";   // generated by the app');
+      $("swScriptText").value = sw.script;
+      return sw.script;
+    }).catch(function () {
+      $("swScriptStatus").className = "status-line err";
+      $("swScriptStatus").textContent = "The script could not be loaded. Check the internet connection and open this step again.";
+    });
+  }
+  function openSheetWizard() {
+    sw.tested = false;
+    var link = location.origin + location.pathname;
+    $("swAppLink").value = link;
+    $("swWhere").textContent = isPhone()
+      ? "You are on a phone. Open the app on a computer with this link, then go to Settings → Connect a Google Sheet."
+      : "You are on a computer, so you can carry on here.";
+    $("swLinkRow").hidden = !isPhone();
+    var d = settings.sheetDraft || {}, cur = (settings.connectors && settings.connectors.googleSheets) || {};
+    $("swUrl").value = d.url || cur.url || "";
+    $("swStatus").textContent = ""; $("swScriptStatus").textContent = "";
+    showSwStep(0);
+    $("sheetWizard").hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+  function closeSheetWizard() { $("sheetWizard").hidden = true; document.body.style.overflow = ""; }
+  function copyText(text, okMsg, el) {
+    var done = function (ok) { el.className = "status-line " + (ok ? "ok" : "err"); el.textContent = ok ? okMsg : "Copying is blocked here. Open “Copy button not working?” and copy the text from the box."; };
+    try { navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
+  }
+  $("openSheetWizard").addEventListener("click", openSheetWizard);
+  $("swClose").addEventListener("click", closeSheetWizard);
+  $("swBack").addEventListener("click", function () { showSwStep(sw.step - 1); });
+  $("swCopyLink").addEventListener("click", function () {
+    var v = $("swAppLink").value;
+    try { navigator.clipboard.writeText(v).then(function () { toast("Link copied. Open it on your computer."); }); } catch (e) { $("swAppLink").select(); }
+  });
+  $("swCopyScript").addEventListener("click", function () {
+    prepareScript().then(function (s) { if (s) copyText(s, "✓ Script copied, with your team key inside. Paste it into the Apps Script editor.", $("swScriptStatus")); });
+  });
+  $("swUrl").addEventListener("input", function () {
+    sw.tested = false; $("swNext").disabled = true; $("swStatus").textContent = "";
+    var d = settings.sheetDraft || {}; d.url = $("swUrl").value.trim(); settings.sheetDraft = d; Settings.save(settings);
+  });
+  $("swTest").addEventListener("click", function () {
+    var url = $("swUrl").value.trim(), st = $("swStatus");
+    if (!/^https:\/\/script\.google\.com\/.+\/exec(\?.*)?$/.test(url)) {
+      st.className = "status-line err";
+      st.textContent = "That doesn't look like the Web app URL. It starts with https://script.google.com/ and ends in /exec.";
+      return;
+    }
+    st.className = "status-line ok"; st.textContent = "Testing…";
+    C.get("googleSheets").test({ url: url, key: swKey() }).then(function (msg) {
+      sw.tested = true; st.className = "status-line ok"; st.textContent = "✓ " + msg; $("swNext").disabled = false; buzz(20);
+    }, function (e) {
+      sw.tested = false; st.className = "status-line err";
+      st.textContent = /team key/i.test(e.message)
+        ? "The Sheet answered, but with a different team key. Copy the script again (step 3), paste it over the old one, then Deploy → Manage deployments → Edit → Version: New version."
+        : e.message + " If you just deployed, check that “Who has access” is set to Anyone.";
+    });
+  });
+  $("swNext").addEventListener("click", function () {
+    var last = document.querySelectorAll("#sheetWizard .sw-step").length - 1;
+    if (sw.step === last) { closeSheetWizard(); return; }
+    if (sw.step === last - 1) {
+      if (!sw.tested) return;
+      settings.destination = "googleSheets";
+      settings.connectors.googleSheets = { url: $("swUrl").value.trim(), key: swKey() };
+      settings.sheetDraft = null;
+      Settings.save(settings);
+      renderSettings(); renderQr();
+      refreshPending().then(syncPending);
+      registerUser();
+    }
+    showSwStep(sw.step + 1);
+  });
+  $("swShowQr").addEventListener("click", function () {
+    closeSheetWizard();
+    var q = $("qr"); if (q) q.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+  });
+
+  // ---------- how to rate: 3-step guide ----------
+  var guideStep = 0;
+  function showGuideStep(i) {
+    var steps = document.querySelectorAll("#guide .g-step");
+    guideStep = Math.max(0, Math.min(steps.length - 1, i));
+    steps.forEach(function (s, k) { s.hidden = k !== guideStep; });
+    document.querySelectorAll("#guide .g-dots i").forEach(function (d, k) { d.classList.toggle("on", k === guideStep); });
+    $("gBack").style.visibility = guideStep ? "visible" : "hidden";
+    $("gNext").textContent = guideStep === steps.length - 1 ? "Start rating" : "Next";
+    $("gCount").textContent = "Step " + (guideStep + 1) + " of " + steps.length;
+  }
+  function openGuide() {
+    showGuideStep(0);
+    $("guide").hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(function () { try { $("gNext").focus(); } catch (e) { /* ignore */ } }, 60);
+  }
+  function closeGuide() {
+    $("guide").hidden = true;
+    document.body.style.overflow = "";
+    if (!settings.guideSeen) { settings.guideSeen = true; Settings.save(settings); }
+  }
+  $("gNext").addEventListener("click", function () {
+    if (guideStep >= document.querySelectorAll("#guide .g-step").length - 1) closeGuide();
+    else showGuideStep(guideStep + 1);
+  });
+  $("gBack").addEventListener("click", function () { showGuideStep(guideStep - 1); });
+  $("gSkip").addEventListener("click", closeGuide);
+  // Swipe between steps on phones
+  (function () {
+    var x0 = null;
+    $("guide").addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    $("guide").addEventListener("touchend", function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 50) showGuideStep(guideStep + (dx < 0 ? 1 : -1));
+    }, { passive: true });
+  })();
 
   // ---------- GPS ----------
   function requestGps() {
@@ -417,7 +949,7 @@
     }
     var L = r.lesions;
     $("lesionLine").innerHTML = L && L.count ? "<b>" + L.count + "</b> lesion" + (L.count === 1 ? "" : "s") + " · average size <b>" + L.meanSizePct.toFixed(2) + "%</b> of leaf · largest <b>" + L.largestPct.toFixed(1) + "%</b>" : "";
-    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
+    $("methodNote").textContent = (r.rules === "taught" ? "Scored with your taught colours. " : "") + ({ background: "Leaf separated from the background automatically (labels and glare left out)", board: "Leaf separated from the board automatically", auto: "Leaf found automatically by the AI leaf finder",
       "auto + taps": "Leaf found automatically, adjusted by you", traced: "Leaf outlined by you", "whole photo": "Whole photo scored as leaf", mixed: "Sections separated in different ways" })[r.segmentation] || "";
 
     var parts = [["Healthy", r.healthyPct, "var(--healthy)"], ["Chlorotic", r.chloroticPct, "var(--chlorotic)"], ["Necrotic", r.necroticPct, "var(--necrotic)"]];
@@ -439,10 +971,13 @@
     if (!$("fTrial").value) $("fTrial").value = settings.trial || "";
     if (!$("fRater").value) $("fRater").value = settings.rater || "";
     updateContext();
+    renderRating();
   }
 
   $("discardBtn").addEventListener("click", function () {
     current = null;
+    pendingRating = null;
+    if (batch.active) { nextInQueue(); return; }
     analyzeState("capture");
     $("camInput").click();
   });
@@ -493,8 +1028,16 @@
     var meta = {
       trial: $("fTrial").value.trim(), plot: $("fPlot").value.trim(), genotype: $("fGenotype").value.trim(),
       rep: $("fRep").value.trim(), leaf: $("fLeaf").value.trim(), rater: $("fRater").value.trim(), notes: $("fNotes").value.trim(),
-      visualScore: visualScore || ""
+      visualScore: visualScore || "",
+      visualPct: pendingRating ? pendingRating.pct : "",
+      ratingMode: pendingRating ? "blind" : (visualScore ? "after app score" : ""),
+      rateSeconds: pendingRating ? pendingRating.seconds : "",
+      ratedAt: pendingRating ? pendingRating.ratedAt : "",
+      setPosition: pendingRating ? pendingRating.position : (batch.active ? batch.pos + "/" + batch.total : ""),
+      hiddenRepeat: !!(batch.active && batch.item && batch.item.repeat),
+      deviceId: settings.deviceId || ""
     };
+    if (pendingRating && !meta.rater) meta.rater = pendingRating.rater;
     // Remember trial and rater for the next leaf
     settings.trial = meta.trial; settings.rater = meta.rater;
     Settings.save(settings); updateHeader();
@@ -525,9 +1068,20 @@
             "Saved on this phone and syncing to " + C.get(settings.destination).name + ".");
         $("savedTitle").textContent = (meta.plot || "Leaf") + " saved";
         $("savedText").textContent = [meta.rep && "Rep " + meta.rep, meta.leaf && "Leaf " + meta.leaf, "Score " + r.score, fmtPct(r.diseasedPct) + " diseased"].filter(Boolean).join(" · ") + ". " + where;
-        // Ready for the next leaf from the same plot: keep plot, trial, rater; bump leaf no.
         $("fNotes").value = "";
+        pendingRating = null;
+        $("visRuler").classList.remove("locked");
         setVisual(null);
+        if (batch.active) {
+          // Rating a set: go straight to the next photo
+          batch.done++;
+          current = null;
+          refreshPending(); syncPending(); protectStorage();
+          toast((meta.plot || "Leaf") + " saved · " + batch.done + " of " + batch.total);
+          nextInQueue();
+          return;
+        }
+        // Ready for the next leaf from the same plot: keep plot, trial, rater; bump leaf no.
         $("fLeaf").value = String((parseInt($("fLeaf").value, 10) || 0) + 1);
         $("nextLeafLabel").textContent = "Next leaf (" + $("fLeaf").value + ")";
         var np = nextPlotAfter(meta.plot);
@@ -563,8 +1117,24 @@
       Per_Leaf_Diseased_Percent: r.perLeaf ? r.perLeaf.map(function (q) { return q.diseasedPct; }).join("; ") : "",
       Per_Leaf_BLS_Score: r.perLeaf ? r.perLeaf.map(function (q) { return q.score; }).join("; ") : "",
       Lesion_Count: r.lesions ? r.lesions.count : "", Mean_Lesion_Size_Percent: r.lesions ? r.lesions.meanSizePct : "",
-      Visual_BLS_Score: m.visualScore || ""
+      Visual_BLS_Score: m.visualScore || "",
+      Visual_Diseased_Percent: m.visualPct === 0 ? 0 : (m.visualPct || ""),
+      Rating_Mode: m.ratingMode || (m.visualScore ? "after app score" : ""),
+      Rating_Seconds: m.rateSeconds || "", Rated_At: m.ratedAt || "", Set_Position: m.setPosition || "",
+      Device_ID: m.deviceId || "", Hidden_Repeat: m.hiddenRepeat ? "yes" : ""
     };
+  }
+
+  // Small JPEG for the in-cell thumbnail in Google Sheets
+  function thumbBase64(blob, side) {
+    if (!blob) return Promise.resolve(null);
+    return decode(blob).then(function (bmp) {
+      var k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      var c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.75).split(",")[1];
+    }).catch(function () { return null; });
   }
 
   function csvCell(v) {
@@ -595,8 +1165,8 @@
       queue.forEach(function (rec) {
         chain = chain.then(function () {
           var withPhotos = settings.uploadPhotos;
-          return Promise.all([withPhotos ? blobToBase64(rec.photo) : null, withPhotos ? blobToBase64(rec.overlay) : null])
-            .then(function (b) { return conn.send({ event: rec.editedAt ? "update" : "record", row: toRow(rec), photo: b[0], overlay: b[1] }, cfg); })
+          return Promise.all([withPhotos ? blobToBase64(rec.photo) : null, withPhotos ? blobToBase64(rec.overlay) : null, withPhotos ? thumbBase64(rec.photo, 240) : null])
+            .then(function (b) { return conn.send({ event: rec.editedAt ? "update" : "record", row: toRow(rec), photo: b[0], overlay: b[1], thumb: b[2] }, cfg); })
             .then(function (resp) {
               rec.sync = "synced"; rec.syncError = null;
               rec.remote = { photoUrl: resp.photoUrl || "", overlayUrl: resp.overlayUrl || "" };
@@ -644,6 +1214,72 @@
 
   function updateHeader() {
     $("trialLabel").textContent = settings.trial ? "Trial · " + settings.trial : "No trial set";
+    $("userBtn").textContent = settings.rater || "Sign in";
+  }
+
+  // ---------- who is using the app ----------
+  // Asked once before the app starts; switch from the name in the top bar.
+  function openWelcome(switching) {
+    $("wTitle").textContent = switching ? "Who’s rating now?" : "Who’s rating today?";
+    $("wName").value = switching ? "" : (settings.rater || "");
+    $("wErr").textContent = "";
+    $("welcome").hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(function () { try { $("wName").focus(); } catch (e) { /* ignore */ } }, 60);
+  }
+  function startAs(name) {
+    var changed = name !== settings.rater;
+    settings.rater = name;
+    if (!settings.deviceId) settings.deviceId = uid();
+    Settings.save(settings);
+    $("fRater").value = name;
+    $("rRater").value = name;
+    if (!$("rate").hidden) showRaterField(false);
+    $("dRater").value = name;
+    updateHeader(); updateContext(); renderQr();
+    $("welcome").hidden = true;
+    document.body.style.overflow = "";
+    if (changed && settings.guideSeen) toast("Rating as " + name);
+    registerUser();
+    if (!settings.guideSeen) openGuide();
+  }
+  $("wForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var name = $("wName").value.trim().replace(/\s+/g, " ");
+    if (name.length < 2) { $("wErr").textContent = "Enter your name or rater ID (at least 2 characters)."; buzz(40); return; }
+    startAs(name.slice(0, 60));
+  });
+  $("userBtn").addEventListener("click", function () { openWelcome(true); });
+
+  function deviceName() {
+    var ua = navigator.userAgent || "";
+    var os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "Mac" : "Other";
+    var br = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "";
+    return os + (br ? " · " + br : "");
+  }
+  // Tells the team's storage (Google Sheet "Users" tab) who uses the app, so
+  // the organiser can see how many people are rating. No storage set up: nothing is sent.
+  function registerUser() {
+    if (!settings.rater || settings.destination === "local" || navigator.onLine === false) return Promise.resolve();
+    var conn = C.get(settings.destination);
+    if (!conn.hello) return Promise.resolve();
+    if (!settings.deviceId) { settings.deviceId = uid(); Settings.save(settings); }
+    return conn.hello({ Rater: settings.rater, Device_ID: settings.deviceId, App_Version: APP_VERSION, Device: deviceName(), Trial: settings.trial || "" },
+      settings.connectors[conn.id] || {}).then(function (d) {
+      if (d && d.users != null) { settings.teamUsers = d.users; settings.teamUsersAt = new Date().toISOString(); Settings.save(settings); }
+      renderTeamUsers();
+    }, function () { /* offline or not set up yet: try again next start */ });
+  }
+  function renderTeamUsers() {
+    var el = $("teamUsers");
+    if (settings.destination === "local") {
+      el.textContent = "To see who uses the app, connect a Google Sheet above. Each person's name, device and last use then appear in its Users tab.";
+    } else if (settings.teamUsers != null) {
+      el.textContent = settings.teamUsers + " " + (settings.teamUsers === 1 ? "person has" : "people have") + " used the app with your team's storage (checked " +
+        new Date(settings.teamUsersAt).toLocaleDateString() + "). Open the Users tab in the Sheet to see who.";
+    } else {
+      el.textContent = "Who uses the app is listed in the Users tab of your team's Sheet.";
+    }
   }
 
   // ---------- records view ----------
@@ -732,7 +1368,9 @@
     kv.push(["Leaf separated by", segLabel(r.segmentation)]);
     kv.push(["Scoring rules", r.rules === "r1" ? "R script v1.0" : r.rules === "taught" ? "Taught colours" : "Calibrated v2"]);
     if (r.lesions) kv.push(["Lesions", r.lesions.count + " · average " + r.lesions.meanSizePct + "% of leaf"]);
-    if (m.visualScore) kv.push(["Visual BLS score", String(m.visualScore)]);
+    if (m.visualScore) kv.push(["Visual BLS score", String(m.visualScore) + (m.ratingMode ? " (" + m.ratingMode + ")" : "")]);
+    if (m.visualPct !== "" && m.visualPct != null) kv.push(["Visual diseased area", fmtPct(+m.visualPct)]);
+    if (m.rateSeconds) kv.push(["Rating time", m.rateSeconds + " s" + (m.setPosition ? " · photo " + m.setPosition : "")]);
     if (r.perLeaf) kv.push(["Per leaf", r.perLeaf.map(function (q, i) { return "Leaf " + (i + 1) + ": " + fmtPct(q.diseasedPct) + " (BLS " + q.score + ")"; }).join(" · ")]);
     if (rec.editedAt) kv.push(["Edited", new Date(rec.editedAt).toLocaleString()]);
     if (rec.sync === "error") kv.push(["Sync error", rec.syncError]);
@@ -832,6 +1470,10 @@
     $("dTrial").value = settings.trial || "";
     $("dRater").value = settings.rater || "";
     $("dPhotos").checked = !!settings.uploadPhotos;
+    $("dShuffle").checked = !!settings.shuffle;
+    $("dRepeat").value = String(settings.repeatPct == null ? 15 : settings.repeatPct);
+    $("dUsage").checked = settings.shareUsage !== false;
+    renderTeamUsers();
     $("destStatus").textContent = "";
     renderPlotSettings();
     renderQr();
@@ -879,6 +1521,7 @@
     renderQr();
     status("✓ Saved. New records go to " + C.get(pickedDest).name + ".", true);
     refreshPending().then(syncPending);
+    registerUser(); renderTeamUsers();
   });
 
   document.querySelectorAll('input[name="rules"]').forEach(function (r) {
@@ -898,9 +1541,13 @@
 
   $("saveDefaults").addEventListener("click", function () {
     settings.trial = $("dTrial").value.trim();
-    settings.rater = $("dRater").value.trim();
+    var newName = $("dRater").value.trim();
+    if (newName.length < 2) { toast("Your name or rater ID is needed"); $("dRater").value = settings.rater || ""; return; }
+    var renamed = newName !== settings.rater;
+    settings.rater = newName;
     settings.uploadPhotos = $("dPhotos").checked;
     Settings.save(settings);
+    if (renamed) registerUser();
     updateHeader();
     renderQr();
     // Carry new defaults into an open, unsaved form
@@ -910,12 +1557,27 @@
     toast("Defaults saved");
   });
 
+  // Rating mode is always on in this app: rate first, then the app scores
+  settings.blind = true;
+  $("saveStudy").addEventListener("click", function () {
+    settings.shuffle = $("dShuffle").checked;
+    settings.repeatPct = +$("dRepeat").value || 0;
+    Settings.save(settings);
+    renderQr(); updateStudyLine();
+    toast((settings.shuffle ? "Random order" : "Name order") + ", " + (settings.repeatPct ? settings.repeatPct + "% hidden repeats" : "no hidden repeats") + " in photo sets");
+  });
+  function updateStudyLine() {
+    $("studyLineText").textContent = (settings.shuffle ? "Pick many photos; they come one by one in random order" : "Pick many photos; they come one by one in name order") +
+      (settings.blind ? ". You rate each before the app does." : ".");
+  }
+  updateStudyLine();
+
   // ---------- team setup link + QR ----------
   function b64url(s) { return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
   function unb64url(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); return decodeURIComponent(escape(atob(s))); }
 
   function setupLink() {
-    var payload = { v: 1, d: settings.destination, c: settings.connectors[settings.destination] || {}, t: settings.trial, p: settings.uploadPhotos };
+    var payload = { v: 1, d: settings.destination, c: settings.connectors[settings.destination] || {}, t: settings.trial, p: settings.uploadPhotos, b: !!settings.blind, s: !!settings.shuffle, h: +settings.repeatPct || 0 };
     if (settings.palette && taughtModel) { payload.k = packPalette(settings.palette); payload.r = settings.rules; }
     return location.origin + location.pathname + "#setup-" + b64url(JSON.stringify(payload));
   }
@@ -952,6 +1614,7 @@
     card.className = "card reveal";
     card.innerHTML = "<h3>Join this team?</h3><p class=\"small muted\" style=\"margin:0\">Records will be sent to <b>" + esc(conn.name) + "</b>" +
       (host ? " at <span class=\"num\">" + esc(host) + "</span>" : "") + (cfg.t ? ", trial <b>" + esc(cfg.t) + "</b>" : "") +
+      (cfg.b ? ", with <b>study mode</b> (rate before seeing the app's score)" : "") +
       ". Only accept a link from someone you trust.</p><div style=\"display:flex;gap:8px\"><button class=\"btn btn-primary\" type=\"button\">Join team</button><button class=\"btn btn-ghost\" type=\"button\">Ignore</button></div>";
     var btns = card.querySelectorAll("button");
     btns[0].addEventListener("click", function () {
@@ -959,7 +1622,9 @@
       settings.connectors[conn.id] = cfg.c || {};
       if (cfg.t) settings.trial = cfg.t;
       if (typeof cfg.p === "boolean") settings.uploadPhotos = cfg.p;
-      if (cfg.k) { try { settings.palette = unpackPalette(cfg.k); taughtModel = E.buildModel(settings.palette); if (cfg.r) settings.rules = cfg.r; } catch (e) { /* ignore a bad palette */ } }
+      if (typeof cfg.s === "boolean") settings.shuffle = cfg.s;
+      if (typeof cfg.h === "number") settings.repeatPct = cfg.h;
+      updateStudyLine();
       Settings.save(settings); updateHeader(); refreshPending(); card.remove();
       toast("Joined. Records now go to " + conn.name);
     });
@@ -977,7 +1642,7 @@
   var samCache = new WeakMap();   // imageData -> image embedding, so re-opening is instant
 
   function segLabel(v) {
-    return { "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
+    return { "background": "Separated from the background automatically", "board": "Separated from the board automatically", "whole photo": "Whole photo (already cropped)", "auto": "Found automatically", "auto + taps": "Found automatically, corrected by taps",
       "traced": "Outline traced by hand", "mixed": "Mixed methods", "black board": "Black board" }[v] || v || "Black board";
   }
   function getSeg() { return segModule ? Promise.resolve(segModule) : import("./segment.js").then(function (m) { return (segModule = m); }); }
@@ -1313,10 +1978,11 @@
   document.addEventListener("keydown", function (e) { if (tr && e.key === "Escape") closeTracer(null); });
 
   // ---------- taught colours (pliman / PlantCV style) ----------
-  var taughtModel = settings.palette ? E.buildModel(settings.palette) : null;
+  // Not offered in the rating app: scoring uses calibrated v2 (or the R script rules)
+  var taughtModel = null;
+  if (settings.rules === "taught") { settings.rules = "v2"; Settings.save(settings); }
   function currentRules() {
     if (settings.rules === "r1") return "r1";
-    if (settings.rules === "taught" && taughtModel) return taughtModel;
     return "v2";
   }
   // Compact form for the team link: only non-zero histogram bins
@@ -1568,7 +2234,18 @@
       '<span class="small muted">Compares the app\'s BLS score with the score your raters gave by eye (ρc = 1 is perfect). ' +
       (isFinite(a.r) ? "Precision r = " + a.r.toFixed(2) + ", accuracy Cb = " + a.cb.toFixed(2) + ". " : "") +
       "On average the app scores " + Math.abs(a.bias).toFixed(1) + " " + (a.bias >= 0 ? "higher" : "lower") + " than the raters." +
-      (ccc < 0.75 ? " Teaching the colours on a few of these leaves usually improves this." : "") + "</span>";
+      "</span>" + pctAgreement(list);
+  }
+  // Same check on diseased area (%), for raters who gave a % estimate
+  function pctAgreement(list) {
+    var p = list.filter(function (r) { var v = r.meta.visualPct; return v !== "" && v != null && isFinite(+v); });
+    if (p.length < 5) return "";
+    var a = linCCC(p.map(function (r) { return r.result.diseasedPct; }), p.map(function (r) { return +r.meta.visualPct; }));
+    var blind = list.filter(function (r) { return /^blind/.test(r.meta.ratingMode || ""); }).length;
+    var mae = p.reduce(function (s, r) { return s + Math.abs(r.result.diseasedPct - r.meta.visualPct); }, 0) / p.length;
+    return '<span class="small">Diseased area: ρc = <b class="num">' + (isFinite(a.ccc) ? a.ccc.toFixed(2) : "–") + "</b>, mean difference " + mae.toFixed(1) +
+      " points, app " + Math.abs(a.bias).toFixed(1) + " points " + (a.bias >= 0 ? "higher" : "lower") + " on average · " + p.length + " leaves" +
+      (blind ? " (" + blind + " rated blind)" : "") + "</span>";
   }
 
   // ---------- visual 1-9 score ruler on the save form ----------
@@ -1586,6 +2263,7 @@
   $("visRuler").addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-vs]");
     if (!b) return;
+    if (pendingRating) { toast("This rating was made blind and is locked."); return; }
     var k = +b.dataset.vs;
     setVisual(visualScore === k ? null : k);
     buzz(8);
@@ -1602,7 +2280,7 @@
       '<div class="form">' + f("ePlot", "Plot / sample ID", m.plot) +
       '<div class="row2">' + f("eRep", "Rep", m.rep, "number") + f("eLeaf", "Leaf no.", m.leaf, "number") + "</div>" +
       f("eGenotype", "Genotype / entry", m.genotype) +
-      f("eVisual", "Visual BLS score (1–9)", m.visualScore, "number") +
+      '<div class="row2">' + f("eVisual", "Visual BLS score (1–9)", m.visualScore, "number") + f("ePct", "Visual diseased %", m.visualPct, "number") + "</div>" +
       '<div class="row2">' + f("eTrial", "Trial", m.trial) + f("eRater", "Rater", m.rater) + "</div>" +
       '<div class="field"><label for="eNotes">Notes</label><textarea id="eNotes">' + esc(m.notes || "") + "</textarea></div></div>" +
       '<div class="sheet-actions"><button class="btn btn-primary" type="button" id="eSave">Save changes</button><button class="btn btn-ghost" type="button" id="eCancel">Cancel</button></div>';
@@ -1610,7 +2288,14 @@
     sheet.querySelector("#eSave").addEventListener("click", function () {
       var v = function (id) { return sheet.querySelector("#" + id).value.trim(); };
       if (!v("ePlot")) { sheet.querySelector("#ePlot").focus(); toast("Plot ID is required"); return; }
-      rec.meta = { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes"), visualScore: /^[1-9]$/.test(v("eVisual")) ? +v("eVisual") : "" };
+      var vs = /^[1-9]$/.test(v("eVisual")) ? +v("eVisual") : "";
+      var vp = v("ePct") === "" ? "" : parseFloat(v("ePct"));
+      if (vp !== "" && !(vp >= 0 && vp <= 100)) { sheet.querySelector("#ePct").focus(); toast("Visual % must be between 0 and 100"); return; }
+      // Study fields are kept; a rating changed after the app's score was seen is marked as edited
+      var mode = m.ratingMode || "";
+      if ((vs !== (m.visualScore || "") || vp !== (m.visualPct === undefined ? "" : m.visualPct)) && /^blind/.test(mode)) mode = "blind, edited after";
+      if (!mode && vs) mode = "after app score";
+      rec.meta = Object.assign({}, m, { plot: v("ePlot"), rep: v("eRep"), leaf: v("eLeaf"), genotype: v("eGenotype"), trial: v("eTrial"), rater: v("eRater"), notes: v("eNotes"), visualScore: vs, visualPct: vp, ratingMode: mode });
       rec.editedAt = new Date().toISOString();
       if (settings.destination !== "local") rec.sync = "pending";
       Records.put(rec).then(function () {
@@ -2060,19 +2745,88 @@
   // Read-only hook for automated tests and troubleshooting
   window.BLSDebug = { current: function () { return current; }, version: APP_VERSION };
 
+  // ---------- carry over from the former test copy at /study/ ----------
+  // Same website, so this app can read what /study/ saved on this device. Done once:
+  // the rater's name and team settings first (before the name screen decides), then
+  // every saved rating that is not here yet. Nothing is deleted from /study/'s storage.
+  function migrateStudySettings() {
+    if (settings.studyMigrated) return;
+    var st = null;
+    try { st = JSON.parse(localStorage.getItem("bls-study-settings-v1")); } catch (e) { st = null; }
+    if (st) {
+      ["rater", "trial", "deviceId", "usageId", "usageDay", "guideSeen", "idNumeric", "teamUsers", "teamUsersAt", "shareUsage"].forEach(function (k) {
+        if ((settings[k] === undefined || settings[k] === null || settings[k] === "") && st[k] !== undefined) settings[k] = st[k];
+      });
+      // a team Google Sheet connected in /study/ is kept, unless this app already sends somewhere
+      if ((!settings.destination || settings.destination === "local") && st.destination && st.destination !== "local") {
+        settings.destination = st.destination;
+        settings.connectors = Object.assign({}, st.connectors || {}, settings.connectors || {});
+      }
+    }
+    settings.studyMigrated = true;
+    Settings.save(settings);
+  }
+  function readStudyRecords() {
+    var exists = indexedDB.databases
+      ? indexedDB.databases().then(function (l) { return l.some(function (d) { return d.name === "bls-leaf-scorer-study"; }); }, function () { return true; })
+      : Promise.resolve(true);
+    return exists.then(function (yes) {
+      if (!yes) return [];
+      return new Promise(function (resolve) {
+        var req;
+        try { req = indexedDB.open("bls-leaf-scorer-study"); } catch (e) { return resolve([]); }
+        req.onupgradeneeded = function () { try { req.transaction.abort(); } catch (e) { /* not there */ } };
+        req.onerror = function () { resolve([]); };
+        req.onsuccess = function () {
+          var db = req.result;
+          if (!db.objectStoreNames.contains("records")) { db.close(); return resolve([]); }
+          var g = db.transaction("records", "readonly").objectStore("records").getAll();
+          g.onsuccess = function () { db.close(); resolve(g.result || []); };
+          g.onerror = function () { db.close(); resolve([]); };
+        };
+      });
+    });
+  }
+  function migrateStudyRecords() {
+    if (settings.studyRecordsMigrated || !window.indexedDB) return Promise.resolve(0);
+    return readStudyRecords().then(function (list) {
+      if (!list.length) return 0;
+      return Records.all().then(function (existing) {
+        var have = {};
+        existing.forEach(function (r) { have[r.id] = 1; });
+        var add = list.filter(function (r) { return r && r.id && r.result && r.meta && !have[r.id]; });
+        return add.reduce(function (p, r) { return p.then(function () { return Records.put(r); }); }, Promise.resolve()).then(function () { return add.length; });
+      });
+    }).then(function (n) {
+      settings.studyRecordsMigrated = true;
+      Settings.save(settings);
+      if (n) { toast(n + " rating" + (n === 1 ? "" : "s") + " from the study version are now in this app"); refreshPending().then(syncPending); }
+      return n;
+    }).catch(function () { return 0; });
+  }
+
   // ---------- start ----------
+  migrateStudySettings();
   $("rules-" + (settings.rules === "r1" ? "r1" : "v2")).checked = true;
   fillPlotOptions();
   updateHeader();
   renderMethod();
   updateContext();
   checkSetupHash();
+  renderTeamUsers();
+  // Name first: the app starts once the person has said who they are
+  if (!settings.rater) openWelcome(false); else registerUser();
+  migrateStudyRecords();
   showInstallCard();
   if (isInstalled()) protectStorage();
   refreshPending();
   syncPending();
-  // Open in a working state: first-time users see the example leaf scored below the camera panel
-  Records.all().then(function (all) { if (!all.length && !current) loadSample(true); });
+  // The rating app opens on the camera panel only: no example result. New people get the
+  // 3-step guide after they enter their name (see startAs); people who had a name already see it once here.
+  if (settings.rater && !settings.guideSeen) openGuide();
+  refreshResume();
+  usagePing();
+  window.addEventListener("online", usagePing);
 
   if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
     try {

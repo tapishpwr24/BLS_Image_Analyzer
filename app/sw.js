@@ -7,11 +7,11 @@
  * - Every page response gets COOP/COEP headers. GitHub Pages can't set them,
  *   and they let the leaf finder use several CPU cores (about 3x faster).
  */
-var VERSION = "v0.9.2";
+var VERSION = "v1.0.0";
 var SHELL_CACHE = "bls-shell-" + VERSION;
 var MODEL_CACHE = "bls-models-v1";          // only bump when the model files change
 var SHELL = [
-  "./", "index.html", "engine.js", "store.js", "app.js", "segment.js", "connectors/connectors.js",
+  "./", "index.html", "privacy.html", "engine.js", "leaffind.js", "store.js", "app.js", "segment.js", "connectors/connectors.js",
   "vendor/jszip.min.js", "vendor/qrcode.js", "vendor/fonts/fonts.css",
   "vendor/fonts/archivo-latin-wdth-normal.woff2", "vendor/fonts/ibm-plex-sans-latin-400-normal.woff2",
   "vendor/fonts/ibm-plex-sans-latin-500-normal.woff2", "vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
@@ -27,7 +27,8 @@ self.addEventListener("install", function (e) {
 
 self.addEventListener("activate", function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== SHELL_CACHE && k !== MODEL_CACHE; }).map(function (k) { return caches.delete(k); }));
+    // older app shells and the former /study/ copy's shell; the model cache is kept
+    return Promise.all(keys.filter(function (k) { return (k.indexOf("bls-shell-") === 0 || k.indexOf("bls-study-shell-") === 0) && k !== SHELL_CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 

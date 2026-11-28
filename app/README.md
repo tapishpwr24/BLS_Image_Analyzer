@@ -77,6 +77,31 @@ should always open the app from the Home Screen icon.
 **App stores:** the same code can be packaged with Capacitor for Google Play ($25 one-time) and the
 App Store ($99/year, and the iPhone build needs a Mac with Xcode). This isn't needed for field use.
 
+## Rating mode (raters versus the model)
+
+Always on (from v1.0, when the study version became the main app). It collects unbiased visual ratings next to the app's
+score, so the model can be evaluated against a panel of raters and then improved.
+
+1. **Take photo**, **Gallery**, or **Rate a set of photos** (pick many photos from the gallery; they
+   come one at a time in random order).
+2. The rater sees **only the original photo** and enters their **rater ID**, the **plant / image ID**
+   (filled from the file name in a set), a **1–9 score** and an optional **% diseased** estimate.
+3. **Lock rating · show app score.** Only now does the app find the leaf and score it. The screen
+   shows rater and app side by side. The rating is locked; changing it later in Records marks it
+   `blind, edited after`.
+4. **Save record.** In a set, the next photo opens straight away.
+
+Each record stores `Rater`, `Plot_ID`, `Image_File`, the app's results, and `Visual_BLS_Score`,
+`Visual_Diseased_Percent`, `Rating_Mode` (`blind` / `after app score`), `Rating_Seconds`, `Rated_At`,
+`Set_Position`. Records go to the phone first, then to the shared Google Sheet (with an in-cell
+photo thumbnail) when online; **Settings → Back up** makes a ZIP with photos as a second copy.
+The team setup link also carries the study settings, so every rater's phone is set up the same way.
+
+Combine all raters and evaluate the model with the Python tool (`BLS_Analyzer_py`):
+`py -m bls_analyzer.study backups\*.zip sheet.xlsx -o study_out [--rescore]`. It gives CCC,
+bias, weighted kappa, inter-rater ICC, per-rater bias, speed and repeatability, and whether the
+model agrees with the panel as well as the raters agree with each other.
+
 ## Storage options
 
 | Option | Setup | Where data goes |
@@ -97,7 +122,10 @@ of the file).
 Healthy_Pixels, Chlorotic_Pixels, Necrotic_Pixels, Healthy_Percent, Chlorotic_Percent,
 Necrotic_Percent, Total_Diseased_Percent, BLS_Score, Disease_Response, QC_Status, Latitude,
 Longitude, GPS_Accuracy_m, Notes, Image_Width, Image_Height, Engine_Version, Device, Photo_URL,
-Overlay_URL`
+Overlay_URL, Sections, Edited_At, Segmentation, Rules, Leaf_Count, Per_Leaf_Diseased_Percent,
+Per_Leaf_BLS_Score, Lesion_Count, Mean_Lesion_Size_Percent, Visual_BLS_Score,
+Visual_Diseased_Percent, Rating_Mode, Rating_Seconds, Rated_At, Set_Position`
+(the Google Sheet adds a `Photo` thumbnail column)
 
 ## Note on the scoring engine (`V_DIVISOR`)
 

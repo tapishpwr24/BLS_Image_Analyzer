@@ -6,16 +6,16 @@
 <title>BLS Leaf Scorer</title>
 <meta name="description" content="Rate bacterial leaf streak on wheat leaves by eye, then compare with the app's image score. Free, works offline, on phones and computers.">
 <meta name="theme-color" content="#0e2318">
-<link rel="icon" href="study/icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="study/icons/apple-touch-icon.png">
+<link rel="icon" href="app/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="app/icons/apple-touch-icon.png">
 <!-- link previews in WhatsApp, email, Slack, Teams -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="BLS Leaf Scorer">
 <meta property="og:description" content="Rate bacterial leaf streak on wheat leaves by eye, then compare with the app's image score. Developed by Tapish Pawar, Ameen Lab, SDSU.">
 <meta property="og:url" content="https://tapishpwr24.github.io/BLS_Image_Analyzer/">
-<meta property="og:image" content="https://tapishpwr24.github.io/BLS_Image_Analyzer/study/icons/ameen-lab-logo.png">
+<meta property="og:image" content="https://tapishpwr24.github.io/BLS_Image_Analyzer/app/icons/ameen-lab-logo.png">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="study/vendor/fonts/fonts.css">
+<link rel="stylesheet" href="app/vendor/fonts/fonts.css">
 <style>
   :root {
     --bg: #e5ece7; --surface: #fbfcfa; --surface-2: #eef3ef; --line: #cbd7ce;
@@ -100,13 +100,13 @@
   <div class="wrap">
     <div>
       <div class="brand">
-        <img src="study/icons/ameen-lab-logo.png" alt="Ameen Lab, Plant Pathology">
+        <img src="app/icons/ameen-lab-logo.png" alt="Ameen Lab, Plant Pathology">
         <span>Ameen Lab<br>South Dakota State University</span>
       </div>
       <h1>BLS Leaf Scorer</h1>
       <p class="lead">Rate bacterial leaf streak on wheat leaves by eye, then see how the app scores the same leaf from the photo. Free, works offline, on phones and computers.</p>
       <div class="cta">
-        <a class="btn btn-go" href="study/">Open the app</a>
+        <a class="btn btn-go" href="app/">Open the app</a>
         <button class="btn btn-ghost" type="button" id="shareBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg>
           <span id="shareLabel">Share link</span>
@@ -155,16 +155,16 @@
   <div class="wrap">
     <span>Developed by <b>Tapish Pawar</b>, Ameen Lab, South Dakota State University (SDSU)</span>
     <nav>
-      <a href="study/privacy.html">Privacy</a>
+      <a href="app/privacy.html">Privacy</a>
       <a href="https://github.com/tapishpwr24/BLS_Image_Analyzer" rel="noopener">Source code</a>
     </nav>
   </div>
 </footer>
 
-<script src="study/vendor/qrcode.js"></script>
+<script src="app/vendor/qrcode.js"></script>
 <script>
 (function () {
-  var appUrl = new URL("study/", location.href).href;
+  var appUrl = new URL("app/", location.href).href;
   var pageUrl = location.origin + location.pathname;
   document.getElementById("qrUrl").textContent = appUrl.replace(/^https?:\/\//, "");
   try {

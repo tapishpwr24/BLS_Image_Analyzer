@@ -1,6 +1,6 @@
 {
-  "name": "BLS Leaf Scorer (Study test)",
-  "short_name": "BLS Study",
+  "name": "BLS Leaf Scorer",
+  "short_name": "BLS Scorer",
   "description": "Photograph a leaf, get its BLS score and diseased leaf area, and save it to your own storage.",
   "id": "./",
   "start_url": "./",

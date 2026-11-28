@@ -2,19 +2,22 @@
 
 Developed by Tapish Pawar, Ameen Lab, South Dakota State University (SDSU).
 
-## Current version (study app v0.13, `study/`)
+## Current version (v1.0, `app/`)
 
-Live at <https://tapishpwr24.github.io/BLS_Image_Analyzer/study/>
+Share page: <https://tapishpwr24.github.io/BLS_Image_Analyzer/> · App: <https://tapishpwr24.github.io/BLS_Image_Analyzer/app/>
+
+The study version became the main app in v1.0. The former `/study/` address forwards to `/app/`;
+ratings and settings saved under `/study/` are copied into `/app/` automatically on each device.
 
 - Name first, then a 3-step guide; rater ID asked once, switch user from the top bar
 - Rating mode: rate by eye (1–9 and % diseased) before the app shows its score; rating locked
 - Phone data entry: plant ID with −/+ and next ID, number pad option, label scanning (Android), % chips
-- Leaf finding ported from the Python analyzer (`study/leaffind.js`): any uniform background,
+- Leaf finding ported from the Python analyzer (`app/leaffind.js`): any uniform background,
   labels and glare left out; AI leaf finder (SlimSAM) for field photos
 - Photo sets: random order, hidden repeats (photo sets only), resume after interruption
 - Data: stays on the device; optional Google Sheet + Drive (guided setup, team QR code);
   CSV export and ZIP backup
-- Anonymous device count (`study/connectors/usage/Usage.gs`) and privacy notice (`study/privacy.html`)
+- Anonymous device count (`app/connectors/usage/Usage.gs`) and privacy notice (`app/privacy.html`)
 - Python (`python/`): batch analyzer and rater-study evaluation (`bls_analyzer.study`)
 
 ## Next version
@@ -35,7 +38,7 @@ test: the app's calibrated rules count pale green as chlorotic, the R/Python rul
 chlorosis.
 
 ### 3. Release
-- Merge `study/` into `app/` (one app, one link); make `mobile-app` the default branch
+- Make `mobile-app` the default branch (or merge it into `main`)
 - Publish on Google Play (PWABuilder); privacy notice and device count are in place
 
 ## Before then (lab pilot)
