@@ -9,7 +9,10 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.12.1";
+  var APP_VERSION = "0.13.0";
+  // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
+  // Empty = nothing is sent. See privacy.html for exactly what is counted.
+  var USAGE_URL = "";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -668,6 +671,39 @@
       .catch(function () { analyzeState("capture"); toast("The example leaf could not be loaded."); });
   }
   $("sampleBtn").addEventListener("click", function () { openGuide(); });
+
+  // ---------- anonymous device count ----------
+  // Once a day per device: a random ID (not the rater's name or the team Device_ID),
+  // app version, platform, installed or browser, language and continent. Nothing else.
+  function usagePing() {
+    if (!USAGE_URL || settings.shareUsage === false || navigator.onLine === false) return;
+    var day = new Date().toISOString().slice(0, 10);
+    if (settings.usageDay === day) return;
+    // the random ID is kept for good, so a device is counted once however often it opens the app
+    if (!settings.usageId) { settings.usageId = uid(); Settings.save(settings); }
+    var ua = navigator.userAgent || "";
+    var platform = /iPhone|iPod/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "Mac" : /Linux|CrOS/.test(ua) ? "Linux" : "Other";
+    var region = "";
+    try { region = (Intl.DateTimeFormat().resolvedOptions().timeZone || "").split("/")[0]; } catch (e) { region = ""; }
+    var body = JSON.stringify({
+      t: "bls-usage-1", id: settings.usageId, v: APP_VERSION, p: platform,
+      m: isInstalled() ? "installed" : "browser", a: /\/study\//.test(location.pathname) ? "study" : "app",
+      l: (navigator.language || "").slice(0, 12), r: region
+    });
+    // A beacon needs no reply (the app's cross-origin isolation would block reading one)
+    // and is delivered even if the app is closed right away.
+    var sent = false;
+    try { sent = !!(navigator.sendBeacon && navigator.sendBeacon(USAGE_URL, new Blob([body], { type: "text/plain;charset=utf-8" }))); } catch (e) { sent = false; }
+    if (!sent) {
+      try { fetch(USAGE_URL, { method: "POST", mode: "no-cors", keepalive: true, headers: { "Content-Type": "text/plain;charset=utf-8" }, body: body }).catch(function () {}); sent = true; } catch (e) { sent = false; }
+    }
+    if (sent) { settings.usageDay = day; Settings.save(settings); }
+  }
+  $("dUsage").addEventListener("change", function () {
+    settings.shareUsage = $("dUsage").checked;
+    Settings.save(settings);
+    toast(settings.shareUsage ? "This device is counted anonymously" : "This device is no longer counted");
+  });
 
   // ---------- guided Google Sheet setup ----------
   // Walks the team leader (or a person working alone) through putting the
@@ -1436,6 +1472,7 @@
     $("dPhotos").checked = !!settings.uploadPhotos;
     $("dShuffle").checked = !!settings.shuffle;
     $("dRepeat").value = String(settings.repeatPct == null ? 15 : settings.repeatPct);
+    $("dUsage").checked = settings.shareUsage !== false;
     renderTeamUsers();
     $("destStatus").textContent = "";
     renderPlotSettings();
@@ -2726,6 +2763,8 @@
   // 3-step guide after they enter their name (see startAs); people who had a name already see it once here.
   if (settings.rater && !settings.guideSeen) openGuide();
   refreshResume();
+  usagePing();
+  window.addEventListener("online", usagePing);
 
   if ("serviceWorker" in navigator && window.isSecureContext && !inFrame) {
     try {

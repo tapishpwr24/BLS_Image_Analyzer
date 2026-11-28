@@ -1083,6 +1083,13 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
     </div>
 
     <div class="card">
+      <h3>Privacy</h3>
+      <label class="check"><input id="dUsage" type="checkbox" checked> Count this device anonymously</label>
+      <p class="small muted" style="margin:0">Once a day the app tells its developer that it is in use: a random number for this device, the app version, phone type, installed or browser, language and continent. Never your name, ratings, photos or location. It helps us know how many people use the app.</p>
+      <a class="link-btn" href="privacy.html" target="_blank" rel="noopener">Read the privacy notice</a>
+    </div>
+
+    <div class="card">
       <h3>Set up a team <span class="muted" style="font-weight:500">(optional, for organisers)</span></h3>
       <p class="small muted" style="margin:0">Only needed when several people send ratings to one shared Google Sheet. Team members scan this code with their phone camera to open the app with the same storage, trial and settings. Keys are included, so only share it with your team.</p>
       <div class="qr-box">
@@ -1187,6 +1194,7 @@ body:has(#splash) .welcome-leaf path { animation-play-state: paused; }
     <span class="status-line err" id="wErr" role="alert"></span>
     <button class="btn btn-primary" type="submit" id="wStart">Start</button>
     <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
+    <p class="welcome-note">By starting you agree that this device is counted anonymously (no names, ratings or photos). <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--board-ink)">Privacy notice</a>. You can switch it off in Settings.</p>
     <div class="lab-credit"><span class="lab-chip"><img src="icons/ameen-lab-logo.png" alt="" onerror="this.closest('.lab-credit').remove()"></span><span>Developed by <b>Tapish Pawar</b><br>Ameen Lab, Plant Pathology</span></div>
   </form>
 </div>

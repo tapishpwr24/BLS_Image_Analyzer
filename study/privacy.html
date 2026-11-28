@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy notice · BLS Leaf Scorer</title>
+<meta name="theme-color" content="#0e2318">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
+<style>
+  :root { --bg: #e5ece7; --surface: #fbfcfa; --ink: #0e2318; --ink-2: #4a5f51; --line: #cbd7ce; --straw: #e3b53c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0a140f; --surface: #112019; --ink: #e7efe8; --ink-2: #9db1a3; --line: #273b30; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.6 "IBM Plex Sans", system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 800 40px/1.02 "Archivo", system-ui, sans-serif; font-stretch: 70%; letter-spacing: -0.015em; margin: 0 0 8px; }
+  h2 { font: 800 22px/1.15 "Archivo", system-ui, sans-serif; font-stretch: 80%; margin: 32px 0 8px; }
+  p, li { max-width: 68ch; }
+  .lead { color: var(--ink-2); margin: 0 0 24px; }
+  .box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 4px 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td, th { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .band { height: 5px; border-radius: 3px; margin: 0 0 28px; background: linear-gradient(90deg, #3e8e4e, #84a53b, #d3b03a, #be6b33, #6e2c1b); }
+  a { color: inherit; text-underline-offset: 3px; }
+  .note { padding-left: 12px; border-left: 3px solid var(--straw); color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <div class="band" aria-hidden="true"></div>
+  <h1>Privacy notice</h1>
+  <p class="lead">BLS Leaf Scorer, developed by Tapish Pawar, Ameen Lab, Plant Pathology. Last updated 27 November 2026.</p>
+
+  <h2>The short version</h2>
+  <ul>
+    <li>Your ratings, photos and name stay on your device unless <b>you</b> connect a Google Sheet or share a file.</li>
+    <li>The app counts devices anonymously, once a day, so we know how many people use it. You can switch this off.</li>
+    <li>There are no advertising or tracking cookies, and nothing is sold or shared with anyone.</li>
+  </ul>
+
+  <h2>What stays on your device</h2>
+  <p>Ratings, photos, the name or rater ID you enter, and your settings are saved in the app's storage on your phone or computer. Deleting the app's site data, or uninstalling it, removes them.</p>
+
+  <h2>What goes where you choose</h2>
+  <p>If you, or your team leader, connect a Google Sheet, your ratings, photos and name are sent straight from your device to <b>that</b> Google account. The app's developer has no access to it. If you export a spreadsheet or a backup, it goes wherever you send it.</p>
+
+  <h2>The anonymous device count</h2>
+  <p>Once a day, while online, the app sends this to its developer:</p>
+  <div class="box">
+    <table>
+      <tr><th>Sent</th><th>Example</th></tr>
+      <tr><td>A random number for this device, made by the app. It is not your name, and not the ID used in team Sheets.</td><td>3f9c…e1a2</td></tr>
+      <tr><td>App version</td><td>0.13.0</td></tr>
+      <tr><td>Type of device</td><td>Android, iPhone, Windows</td></tr>
+      <tr><td>Opened as an installed app or in a browser</td><td>installed</td></tr>
+      <tr><td>Device language</td><td>en-US</td></tr>
+      <tr><td>Continent, from the device's time zone</td><td>America</td></tr>
+    </table>
+  </div>
+  <p><b>Never sent:</b> your name or rater ID, ratings, photos, plant IDs, GPS location, contacts, or anything else on your device.</p>
+  <p class="note">This lets us report how many devices use the app, how many are active, and on which kinds of device, without knowing who anyone is.</p>
+
+  <h2>Switching the count off</h2>
+  <p>In the app, open <b>Settings → Privacy</b> and untick <b>Count this device anonymously</b>. Nothing more is sent from that device.</p>
+
+  <h2>Questions</h2>
+  <p>Contact the developer through the project's repository: <a href="https://github.com/tapishpwr24/BLS_Image_Analyzer" target="_blank" rel="noopener">github.com/tapishpwr24/BLS_Image_Analyzer</a>.</p>
+</main>
+</body>
+</html>
