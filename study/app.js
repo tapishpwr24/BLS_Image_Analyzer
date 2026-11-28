@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "0.10.2";
+  var APP_VERSION = "0.11.0";
   var GAUGE_C = 2 * Math.PI * 56;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -255,8 +255,106 @@
     $("rateErr").textContent = "";
     buzz(8);
   });
-  $("rPctRange").addEventListener("input", function () { $("rPct").value = $("rPctRange").value; });
-  $("rPct").addEventListener("input", function () { var v = parseFloat($("rPct").value); if (isFinite(v)) $("rPctRange").value = Math.max(0, Math.min(100, v)); });
+  // ---------- phone data entry ----------
+  // % by tapping: chips for the usual estimates, −1/+1 to fine-tune; typing is optional
+  var PCT_CHIPS = [0, 1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90];
+  $("pctChips").innerHTML = PCT_CHIPS.map(function (v) { return '<button type="button" data-v="' + v + '" aria-pressed="false">' + v + "</button>"; }).join("");
+  function readPct() { var t = $("rPct").value.trim().replace(",", "."); return t === "" ? "" : parseFloat(t); }
+  function markChips() {
+    var cur = readPct();
+    $("pctChips").querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", String(cur !== "" && +b.dataset.v === cur)); });
+  }
+  function setPct(v) {
+    if (v === "" || v == null || !isFinite(v)) { $("rPct").value = ""; }
+    else { v = Math.max(0, Math.min(100, Math.round(v * 10) / 10)); $("rPct").value = String(v); }
+    markChips();
+    $("rateErr").textContent = "";
+  }
+  $("pctChips").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-v]"); if (!b) return;
+    setPct(+b.dataset.v); buzz(8);
+  });
+  document.querySelectorAll("[data-pct]").forEach(function (b) {
+    b.addEventListener("click", function () { var c = readPct(); setPct((c === "" ? 0 : c) + (+b.dataset.pct)); buzz(6); });
+  });
+  $("rPct").addEventListener("input", markChips);   // typing is left as typed (e.g. "12.5")
+
+  // Plant ID: step the number in the ID up or down (P-0099 → P-0100), keeps zero padding
+  function stepId(id, d) {
+    id = String(id || "");
+    if (d > 0) { var np = nextPlotAfter(id); if (np) return np.plot; }
+    var m = /^(.*?)(\d+)(\D*)$/.exec(id);
+    if (!m) return id;
+    var n = Math.max(0, parseInt(m[2], 10) + d), s = String(n);
+    while (s.length < m[2].length) s = "0" + s;
+    return m[1] + s + m[3];
+  }
+  // The specimen label under the photo follows the plant ID as it is typed or stepped
+  function updateSpecLabel() {
+    $("specPlot").textContent = $("rPlot").value.trim() || "–";
+    var d = new Date().toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+    $("specMeta").textContent = (settings.rater ? "Rated by " + settings.rater + ", " : "") + d;
+  }
+  $("rPlot").addEventListener("input", updateSpecLabel);
+  $("idUp").addEventListener("click", function () { $("rPlot").value = stepId($("rPlot").value, 1); updateSpecLabel(); buzz(6); });
+  $("idDown").addEventListener("click", function () { $("rPlot").value = stepId($("rPlot").value, -1); updateSpecLabel(); buzz(6); });
+  // Number pad or full keyboard for IDs, remembered on this phone
+  function applyIdKeyboard() {
+    var num = !!settings.idNumeric;
+    $("rPlot").setAttribute("inputmode", num ? "numeric" : "text");
+    $("idKb").textContent = num ? "Use letter keyboard" : "Use number pad";
+  }
+  $("idKb").addEventListener("click", function () {
+    settings.idNumeric = !settings.idNumeric; Settings.save(settings); applyIdKeyboard();
+    var i = $("rPlot"); i.blur(); setTimeout(function () { i.focus(); }, 60);
+  });
+  applyIdKeyboard();
+
+  // "Done" on the phone keyboard closes it
+  ["rPlot", "rPct"].forEach(function (id) {
+    $(id).addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); ev.target.blur(); } });
+  });
+  // While typing, the bottom tab bar steps aside so the keyboard does not cover the fields
+  document.addEventListener("focusin", function (ev) {
+    if (ev.target.matches && ev.target.matches("input[type=text], input[type=number], input:not([type]), textarea")) document.body.classList.add("typing");
+  });
+  document.addEventListener("focusout", function () { setTimeout(function () {
+    var a = document.activeElement;
+    if (!a || !a.matches || !a.matches("input, textarea")) document.body.classList.remove("typing");
+  }, 50); });
+
+  // Scan the plant label (QR code or barcode) to fill in the ID. Android Chrome and
+  // Edge have a built-in barcode reader; elsewhere the button stays hidden.
+  var scan = null;
+  if ("BarcodeDetector" in window) $("idScan").hidden = false;
+  $("idScan").addEventListener("click", function () {
+    var det;
+    try { det = new window.BarcodeDetector(); } catch (e) { toast("Scanning is not available on this phone"); return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(function (stream) {
+      scan = { stream: stream, det: det, timer: null };
+      var v = $("scanVideo"); v.srcObject = stream; v.play();
+      $("scanner").hidden = false;
+      (function look() {
+        if (!scan) return;
+        det.detect(v).then(function (codes) {
+          if (!scan) return;
+          var c = codes && codes[0] && String(codes[0].rawValue || "").trim();
+          if (c) { $("rPlot").value = c.slice(0, 60); updateSpecLabel(); buzz([20, 40, 20]); closeScan(); toast("Plant ID: " + c.slice(0, 60)); return; }
+          scan.timer = setTimeout(look, 200);
+        }, function () { if (scan) scan.timer = setTimeout(look, 400); });
+      })();
+    }, function () { toast("Camera not allowed. Type the ID instead."); });
+  });
+  function closeScan() {
+    if (!scan) { $("scanner").hidden = true; return; }
+    clearTimeout(scan.timer);
+    scan.stream.getTracks().forEach(function (t) { t.stop(); });
+    scan = null;
+    $("scanVideo").srcObject = null;
+    $("scanner").hidden = true;
+  }
+  $("scanClose").addEventListener("click", closeScan);
+  var lastRatedPlot = "";
 
   function drawPhoto(canvas, frame, data) {
     var rotate = data.height > data.width * 1.6;
@@ -279,9 +377,11 @@
     // The rater ID is asked once; after that it is shown, not asked again
     $("rRater").value = settings.rater || $("fRater").value.trim() || "";
     showRaterField(!$("rRater").value);
-    $("rPlot").value = batch.active ? stem(name) : $("fPlot").value.trim();
+    // In a photo set the ID is the file name; otherwise suggest the next ID after the last one
+    $("rPlot").value = batch.active ? stem(name) : (lastRatedPlot ? stepId(lastRatedPlot, 1) : $("fPlot").value.trim());
     setRate(null);
-    $("rPct").value = ""; $("rPctRange").value = 0;
+    setPct("");
+    updateSpecLabel();
     $("rateErr").textContent = "";
     $("rateProgress").textContent = batch.active ? "Photo " + batch.pos + " of " + batch.total + " · rate first" : "Rate first";
     analyzeState("rate");
@@ -300,7 +400,7 @@
 
   $("rateLock").addEventListener("click", function () {
     var rater = $("rRater").value.trim(), plot = $("rPlot").value.trim();
-    var pctTxt = $("rPct").value.trim(), pct = pctTxt === "" ? "" : parseFloat(pctTxt);
+    var pct = readPct();
     var err = !rater ? "Enter your rater ID." : !plot ? "Enter the plant or image ID." : !rateScore ? "Tap your 1–9 score." :
       (pct !== "" && !(pct >= 0 && pct <= 100)) ? "Diseased area must be between 0 and 100%." : "";
     if (err) { $("rateErr").textContent = err; buzz(40); return; }
@@ -311,7 +411,7 @@
     };
     // The save form picks these up; the rater ID is remembered for the next leaf
     $("fPlot").value = plot; $("fRater").value = rater;
-    if (batch.active) $("fLeaf").value = "1";
+    if (batch.active) $("fLeaf").value = "1"; else lastRatedPlot = plot;
     settings.rater = rater; Settings.save(settings);
     buzz(20);
     var r = rateResolve; rateResolve = null;
@@ -368,7 +468,7 @@
     $("visHint").textContent = "Rated blind by " + p.rater + " before the app's score was shown. Locked.";
     var d = r.score - p.score;
     cmp.innerHTML =
-      '<div class="cmp"><span class="eyebrow">' + esc(p.rater) + ' · by eye</span><b class="num" style="color:' + scoreColor(p.score) + '">' + p.score + '</b><span class="small">' + (p.pct === "" ? "no % given" : fmtPct(p.pct) + " diseased") + "</span></div>" +
+      '<div class="cmp"><span class="eyebrow">' + esc(p.rater) + ', by eye</span><b class="num" style="color:' + scoreColor(p.score) + '">' + p.score + '</b><span class="small">' + (p.pct === "" ? "no % given" : fmtPct(p.pct) + " diseased") + "</span></div>" +
       '<div class="cmp"><span class="eyebrow">App</span><b class="num" style="color:' + scoreColor(r.score) + '">' + r.score + '</b><span class="small">' + fmtPct(r.diseasedPct) + " diseased</span></div>" +
       '<span class="small muted cmp-note">' + (d === 0 ? "Same score." : "The app scored " + Math.abs(d) + " " + (d > 0 ? "higher" : "lower") + ".") +
       " Rating took " + p.seconds + " s. It is locked and saved with this record" + (batch.active ? " (" + p.position + ")" : "") + ".</span>";
@@ -845,7 +945,7 @@
   // ---------- who is using the app ----------
   // Asked once before the app starts; switch from the name in the top bar.
   function openWelcome(switching) {
-    $("wTitle").textContent = switching ? "Who is rating now?" : "Welcome";
+    $("wTitle").textContent = switching ? "Who’s rating now?" : "Who’s rating today?";
     $("wName").value = switching ? "" : (settings.rater || "");
     $("wErr").textContent = "";
     $("welcome").hidden = false;

@@ -6,7 +6,7 @@
 <title>BLS Leaf Scorer · Study test</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Photograph a leaf, get its BLS score and diseased leaf area, and save it to your own storage.">
-<meta name="theme-color" content="#14281b">
+<meta name="theme-color" content="#0e2318">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -296,6 +296,33 @@ textarea { min-height: 70px; resize: vertical; }
 .welcome-note { margin: 4px 0 0; font-size: 12.5px; color: var(--board-ink-2); }
 .welcome-card .btn { min-height: 54px; font-size: 17px; }
 .user-btn { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+/* phone data entry */
+.id-row { display: grid; grid-template-columns: 52px 1fr 52px; gap: 6px; }
+.id-row input { font: 600 18px var(--font-data); text-align: center; letter-spacing: 0.02em; }
+.id-step { min-height: 48px; min-width: 48px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font: 700 18px var(--font-display); cursor: pointer; touch-action: manipulation; }
+.id-step:active { background: var(--line); }
+.id-tools { display: flex; justify-content: space-between; gap: 10px; }
+.id-tools .link-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.id-tools svg { width: 18px; height: 18px; }
+.pct-chips { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.pct-chips button { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font: 600 15px var(--font-data); cursor: pointer; touch-action: manipulation; padding: 0; }
+.pct-chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pct-fine { display: grid; grid-template-columns: 52px 1fr auto 52px; gap: 6px; align-items: center; }
+.pct-fine input { font: 600 20px var(--font-data); text-align: center; }
+.pct-unit { font: 600 16px var(--font-data); color: var(--ink-2); }
+.sticky-actions { position: sticky; bottom: calc(var(--tabbar-h) + 18px + env(safe-area-inset-bottom, 0px)); z-index: 8; background: var(--surface); padding: 10px; margin: 0 -10px; border-radius: 16px; box-shadow: 0 -6px 18px rgba(10,20,14,0.10); }
+.sticky-actions .btn { min-height: 54px; font-size: 16px; }
+/* After the reveal, Save is pinned above the tab bar, wherever the person has scrolled */
+#metaForm .sticky-actions { position: fixed; left: 50%; transform: translateX(-50%); width: min(520px, calc(100% - 24px)); margin: 0; }
+#result { padding-bottom: 84px; }
+body.typing .tabbar { display: none; }
+body.typing .sticky-actions { bottom: 8px; }
+.ruler button { touch-action: manipulation; }
+@media (max-width: 600px) { #rRuler button { min-height: 52px; font-size: 19px; } }
+.scanner { position: fixed; inset: 0; z-index: 90; background: #000; display: grid; grid-template-rows: 1fr auto; }
+.scanner video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame { position: absolute; left: 12%; right: 12%; top: 30%; height: 26%; border: 3px solid #8fd19e; border-radius: 16px; box-shadow: 0 0 0 100vmax rgba(0,0,0,0.45); pointer-events: none; }
+.scan-bar { display: grid; gap: 10px; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); background: #0c1610; color: #eef4ec; text-align: center; }
 .rater-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 14px; }
 #rIdRow.one { grid-template-columns: 1fr; }
 #rateFrame { max-height: 70vh; }
@@ -438,6 +465,139 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
   .capture-top { grid-template-columns: 1fr 76px; }
   .finder { width: 76px; height: 96px; }
 }
+/* =====================================================================
+   Specimen-sheet skin (v0.11)
+   Idea: every leaf is rated like a pressed specimen on a herbarium sheet.
+   One bold element: the 1–9 scale is a single disease band running from
+   healthy leaf green through straw to lesion brown. Everything else is
+   quiet: cool glasshouse paper, deep field-green ink, hairline borders.
+   ===================================================================== */
+:root {
+  --bg: #e5ece7; --surface: #fbfcfa; --surface-2: #eef3ef; --line: #cbd7ce;
+  --ink: #0e2318; --ink-2: #4a5f51; --accent: #17402b; --accent-ink: #f4f8f2;
+  --board: #0e2318; --board-2: #17402b; --board-ink: #eef4ec; --board-ink-2: #a8c2af; --leaf: #9bd3a6;
+  --straw: #e3b53c; --paper: #f7f8f3; --tape: rgba(227, 181, 60, 0.38);
+  --healthy: #3e8e4e; --chlorotic: #d4a526; --necrotic: #a4482a;
+  --s1: #3e8e4e; --s2: #5e9a43; --s3: #84a53b; --s4: #abae38; --s5: #d3b03a;
+  --s6: #d2913a; --s7: #be6b33; --s8: #a4482a; --s9: #6e2c1b;
+  --band: linear-gradient(90deg, var(--s1) 0%, var(--s2) 12.5%, var(--s3) 25%, var(--s4) 37.5%, var(--s5) 50%, var(--s6) 62.5%, var(--s7) 75%, var(--s8) 87.5%, var(--s9) 100%);
+  --shadow: none;
+  --radius: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a140f; --surface: #112019; --surface-2: #192b22; --line: #273b30;
+    --ink: #e7efe8; --ink-2: #9db1a3; --accent: #9bd3a6; --accent-ink: #0a140f;
+    --board: #081109; --board-2: #12301f; --straw: #f0c64e; --paper: #16261e; --tape: rgba(240, 198, 78, 0.28);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0a140f; --surface: #112019; --surface-2: #192b22; --line: #273b30;
+  --ink: #e7efe8; --ink-2: #9db1a3; --accent: #9bd3a6; --accent-ink: #0a140f;
+  --board: #081109; --board-2: #12301f; --straw: #f0c64e; --paper: #16261e; --tape: rgba(240, 198, 78, 0.28);
+}
+
+body { font-size: 15.5px; }
+:focus-visible { outline: 3px solid var(--straw); outline-offset: 2px; }
+
+/* Type: Archivo's width axis does the talking (narrow headings, wide numerals) */
+h2 { font: 800 29px/1.05 var(--font-display); font-stretch: 72%; letter-spacing: -0.012em; }
+h3 { font: 750 17px/1.25 var(--font-display); font-stretch: 88%; letter-spacing: 0; }
+.eyebrow { font: 600 13px/1.25 var(--font-display); font-stretch: 92%; text-transform: none; letter-spacing: 0.005em; color: var(--ink-2); }
+.brand b { font-stretch: 74%; font-size: 19px; letter-spacing: 0; }
+.brand span { font: 500 12px/1.2 var(--font-body); }
+.brand b { white-space: nowrap; }
+.test-tag { font: 700 11px/1 var(--font-display); font-style: normal; font-stretch: 100%; vertical-align: 3px; margin-left: 4px; padding: 3px 7px; border-radius: 999px; background: var(--straw); color: #1a1405; }
+
+/* Surfaces: hairlines instead of soft shadows; radius follows hierarchy */
+.card { box-shadow: none; border: 1px solid var(--line); border-radius: var(--radius); }
+.btn { border-radius: 12px; font-family: var(--font-display); font-weight: 750; font-stretch: 96%; letter-spacing: 0.005em; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:active { background: var(--board); }
+.btn-ghost { border-color: var(--line); }
+.link-btn { color: var(--accent); }
+
+/* Home panel: field-green board with the disease band as its top edge */
+.capture { background: var(--board) linear-gradient(var(--board), var(--board)); background-image: var(--band); background-size: 100% 5px; background-repeat: no-repeat; background-color: var(--board); border-radius: 20px; box-shadow: none; padding-top: 24px; }
+.capture h2 { font-size: 31px; }
+.btn-camera { background: var(--board-ink); color: var(--board); }
+.study-line { border-style: solid; border-color: rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.04); }
+
+/* Top bar and tab bar: the same field green, so the content sits between two dark bands */
+.tabbar-inner { background: var(--board); box-shadow: 0 12px 32px rgba(8, 20, 13, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.tab { color: var(--board-ink-2); }
+.tab[aria-current="page"] { color: #fff; background: rgba(255, 255, 255, 0.10); }
+.tab[aria-current="page"] svg { color: var(--straw); }
+
+/* ---- the disease band (rating ruler and result scale) ---- */
+.ruler { gap: 0; padding: 4px; background: var(--band); border-radius: 30px 8px 30px 8px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.ruler button {
+  background: transparent !important; opacity: 1; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  min-height: 50px; border-radius: 999px; font: 800 19px var(--font-display); font-stretch: 112%;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.18s cubic-bezier(.2,.9,.3,1.4), box-shadow 0.15s ease;
+}
+.ruler button[aria-checked="true"] {
+  background: #fbfcfa !important; color: #0e2318; text-shadow: none; transform: scale(1.14);
+  box-shadow: 0 0 0 3px var(--straw), 0 4px 12px rgba(0, 0, 0, 0.28);
+}
+#rRuler button { min-height: 52px; }
+/* the straw-yellow middle of the band needs dark numerals to stay readable in sun */
+.ruler button:nth-child(n+3):nth-child(-n+6):not([aria-checked="true"]),
+.scale-bar div:nth-child(n+3):nth-child(-n+6):not(.on) { color: rgba(26, 22, 6, 0.82); text-shadow: none; }
+.scale-bar { gap: 0; padding: 3px; height: 34px; background: var(--band); border-radius: 22px 6px 22px 6px; }
+.scale-bar div { background: transparent !important; opacity: 1; color: rgba(255, 255, 255, 0.8); border-radius: 999px; font: 750 13px var(--font-display); font-stretch: 110%; }
+.scale-bar div.on { background: #fbfcfa !important; color: #0e2318; transform: scale(1.12); box-shadow: 0 0 0 2px var(--straw), 0 3px 8px rgba(0, 0, 0, 0.25); }
+.scale-ticks { font: 500 10.5px var(--font-body); }
+
+/* ---- the specimen sheet (rating screen) ---- */
+.rate-card { border: 0; background: transparent; padding: 0; gap: 16px; }
+.rate-head h3 { font-size: 26px; font-stretch: 72%; font-weight: 800; letter-spacing: -0.01em; }
+.blind-tag { font: 700 12px var(--font-display); font-stretch: 92%; text-transform: none; letter-spacing: 0.01em; background: var(--board); color: var(--board-ink); padding: 6px 10px; }
+.specimen { position: relative; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 14px 14px 12px; display: grid; gap: 10px; }
+.specimen::before, .specimen::after { content: ""; position: absolute; top: -7px; width: 58px; height: 18px; background: var(--tape); border-radius: 2px; }
+.specimen::before { left: 18px; transform: rotate(-7deg); }
+.specimen::after { right: 18px; transform: rotate(6deg); }
+#rateFrame { border-radius: 2px; background: #050806; }
+.spec-label { justify-self: end; display: grid; gap: 1px; min-width: 150px; max-width: 100%; padding: 7px 11px 8px; border: 1.5px solid var(--ink); border-radius: 2px; background: var(--surface); }
+.spec-label span { font: 600 11.5px/1.2 var(--font-display); font-stretch: 90%; color: var(--ink-2); }
+.spec-label b { font: 800 22px/1.05 var(--font-display); font-stretch: 70%; letter-spacing: 0.01em; overflow-wrap: anywhere; }
+.rate-card > .field, .rate-card > .row2, .rate-card > .rater-line { padding-inline: 2px; }
+.rater-line { background: transparent; border: 1px dashed var(--line); }
+.label, .field label { font-family: var(--font-display); font-weight: 700; font-stretch: 92%; }
+.id-row input { font: 800 22px var(--font-display); font-stretch: 80%; letter-spacing: 0.02em; }
+.id-step { background: var(--surface); }
+.pct-chips button { background: var(--surface); font: 700 15px var(--font-display); font-stretch: 105%; }
+.pct-chips button[aria-pressed="true"] { background: var(--straw); color: #1a1405; border-color: var(--straw); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+.pct-fine input { font: 800 24px var(--font-display); font-stretch: 105%; }
+.sticky-actions { background: var(--bg); box-shadow: none; border-top: 1px solid var(--line); border-radius: 16px; }
+#metaForm .sticky-actions { background: var(--surface); border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(8, 20, 13, 0.18); }
+
+/* Rater vs app, after the reveal */
+.cmp-card .cmp { background: var(--surface-2); border-radius: 12px; }
+.cmp-card .cmp b { font: 800 40px/1 var(--font-display); font-stretch: 115%; }
+.cmp-card .eyebrow { font-size: 12.5px; }
+
+/* Result gauge numerals: wide, like the band */
+.gauge-center .big { font-stretch: 112%; font-size: 48px; }
+.gauge-center .lbl { font: 600 11px/1 var(--font-display); text-transform: none; letter-spacing: 0.01em; }
+
+/* ---- welcome: who is rating ---- */
+.welcome { background: var(--board); }
+.welcome-card { gap: 14px; }
+.welcome-card h2 { font-size: clamp(40px, 12vw, 56px); line-height: 0.95; font-stretch: 66%; letter-spacing: -0.02em; color: #fff; }
+.welcome-leaf { width: 100%; height: 96px; display: block; margin-bottom: 6px; }
+.welcome-leaf .blade { fill: #3e8e4e; }
+.welcome-leaf .vein { fill: none; stroke: rgba(255, 255, 255, 0.18); stroke-width: 1.5; }
+.welcome-leaf .halo { fill: none; stroke: #e3b53c; stroke-width: 9; stroke-linecap: round; opacity: 0.6; }
+.welcome-leaf .streak { fill: none; stroke: #7a3119; stroke-width: 3.5; stroke-linecap: round; }
+.welcome-leaf .halo, .welcome-leaf .streak { stroke-dasharray: 160; stroke-dashoffset: 160; animation: streak 1.2s cubic-bezier(.3,.7,.2,1) 0.2s forwards; }
+.welcome-leaf .d2 { animation-delay: 0.5s; } .welcome-leaf .d3 { animation-delay: 0.8s; }
+@keyframes streak { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .welcome-leaf .halo, .welcome-leaf .streak { animation: none; stroke-dashoffset: 0; } }
+.welcome-text { font-size: 15.5px; }
+.welcome-card input { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.22); color: #fff; }
+.welcome-card input::placeholder { color: rgba(238, 244, 236, 0.45); }
+.welcome-card .btn-primary { background: var(--straw); color: #1a1405; }
 </style>
 </head>
 <body>
@@ -445,7 +605,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 <header class="topbar">
   <div class="topbar-inner">
     <img class="logo" src="icons/icon-192.png" alt="">
-    <h1 class="brand"><b>BLS Leaf Scorer · Study test</b><span><button class="user-btn" type="button" id="userBtn" aria-label="Switch user"></button> · <span id="trialLabel">No trial set</span></span></h1>
+    <h1 class="brand"><b>BLS Leaf Scorer <i class="test-tag">Study</i></b><span><button class="user-btn" type="button" id="userBtn" aria-label="Switch user"></button> · <span id="trialLabel">No trial set</span></span></h1>
     <button class="sync-pill" id="syncPill" type="button" data-state="ok" aria-label="Sync status">
       <span class="dot"></span><span id="syncText">This phone</span>
     </button>
@@ -476,7 +636,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
       <div class="capture-top">
         <div>
           <div class="eyebrow">New leaf</div>
-          <h2 id="captureTitle">Photograph the leaf. Rate it, then see the app's score.</h2>
+          <h2 id="captureTitle">Snap a leaf. Rate it by eye.</h2>
         </div>
         <svg class="finder" viewBox="0 0 96 120" aria-hidden="true">
           <rect x="6" y="6" width="84" height="108" rx="8" fill="#050806"/>
@@ -539,7 +699,10 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <div><div class="eyebrow" id="rateProgress">Rate first</div><h3 style="margin:2px 0 0">Score this leaf by eye</h3></div>
           <span class="blind-tag">App score hidden</span>
         </div>
-        <div class="leaf-frame" id="rateFrame"><canvas id="rateCanvas" aria-label="Original photo"></canvas></div>
+        <div class="specimen">
+          <div class="leaf-frame" id="rateFrame"><canvas id="rateCanvas" aria-label="Original photo"></canvas></div>
+          <div class="spec-label" aria-hidden="true"><span>Plant</span><b id="specPlot">–</b><span id="specMeta"></span></div>
+        </div>
         <p class="small muted" style="margin:0">Scroll the photo to see all of the leaf. The app scores it only after you lock your rating.</p>
         <div class="rater-line" id="rRaterChip" hidden>
           <span>Rater <b id="rRaterName"></b></span>
@@ -547,18 +710,34 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
         </div>
         <div class="row2" id="rIdRow">
           <div class="field" id="rRaterField"><label for="rRater">Rater ID <span class="muted" style="font-weight:400">(asked once)</span></label><input id="rRater" type="text" placeholder="e.g. R01 or your initials" autocomplete="off"></div>
-          <div class="field"><label for="rPlot">Plant / image ID</label><input id="rPlot" type="text" placeholder="e.g. P-1042" list="plotOptions" autocomplete="off"></div>
+          <div class="field"><label for="rPlot">Plant / image ID</label>
+            <div class="id-row">
+              <button type="button" class="id-step" id="idDown" aria-label="Previous ID">−</button>
+              <input id="rPlot" type="text" placeholder="e.g. P-1042" list="plotOptions" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
+              <button type="button" class="id-step" id="idUp" aria-label="Next ID">+</button>
+            </div>
+            <div class="id-tools">
+              <button type="button" class="link-btn" id="idKb" aria-label="Switch keyboard">Use number pad</button>
+              <button type="button" class="link-btn" id="idScan" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10"/></svg>Scan label</button>
+            </div>
+          </div>
         </div>
         <div class="field"><span class="label" id="rLbl">BLS score, 1–9</span>
           <div class="ruler" role="radiogroup" aria-labelledby="rLbl" id="rRuler"></div>
           <div class="scale-ticks"><span>≤0.5</span><span>2</span><span>6</span><span>12</span><span>25</span><span>40</span><span>60</span><span>75</span><span>&gt;75</span></div>
         </div>
-        <div class="field"><label for="rPct">Diseased leaf area, % <span class="muted" style="font-weight:400">(your estimate)</span></label>
-          <div class="pct-row"><input id="rPctRange" type="range" min="0" max="100" step="1" value="0" aria-label="Diseased leaf area slider"><input id="rPct" type="number" min="0" max="100" step="0.5" inputmode="decimal" placeholder="–"></div>
+        <div class="field"><span class="label" id="pctLbl">Diseased leaf area, % <span class="muted" style="font-weight:400">(tap the closest, then fine-tune)</span></span>
+          <div class="pct-chips" role="group" aria-labelledby="pctLbl" id="pctChips"></div>
+          <div class="pct-fine">
+            <button type="button" class="id-step" data-pct="-1" aria-label="1 percent less">−1</button>
+            <input id="rPct" type="text" inputmode="decimal" placeholder="–" aria-label="Diseased leaf area, %" enterkeyhint="done" autocomplete="off">
+            <span class="pct-unit">%</span>
+            <button type="button" class="id-step" data-pct="1" aria-label="1 percent more">+1</button>
+          </div>
         </div>
         <span class="status-line err" id="rateErr" role="alert"></span>
-        <div class="save-row">
-          <button class="btn btn-primary" type="button" id="rateLock">Lock rating · show app score</button>
+        <div class="save-row sticky-actions">
+          <button class="btn btn-primary" type="button" id="rateLock">Lock · show app score</button>
           <button class="btn btn-ghost" type="button" id="rateSkip">Skip</button>
         </div>
       </div>
@@ -648,7 +827,7 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
           <label class="check"><input id="fGps" type="checkbox" checked> Record GPS location</label>
         </div>
 
-        <div class="save-row">
+        <div class="save-row sticky-actions">
           <button class="btn btn-primary" type="submit" id="saveBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
             Save record
@@ -874,8 +1053,14 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
 
 <div class="welcome" id="welcome" hidden role="dialog" aria-modal="true" aria-labelledby="wTitle">
   <form class="welcome-card" id="wForm" autocomplete="off">
-    <img class="welcome-logo" src="icons/icon-192.png" alt="">
-    <div class="eyebrow" style="color:var(--board-ink-2)">BLS Leaf Scorer · Rating</div>
+    <svg class="welcome-leaf" viewBox="0 0 360 96" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <path class="blade" d="M4 52 C 60 10, 220 8, 356 30 C 230 70, 90 92, 4 52 Z"/>
+      <path class="vein" d="M10 52 C 120 40, 240 32, 350 30"/>
+      <path class="halo" d="M58 44 C 100 37, 150 33, 196 31"/><path class="streak" d="M62 44 C 102 37, 150 33, 192 31"/>
+      <path class="halo d2" d="M150 46 C 200 42, 250 38, 300 35"/><path class="streak d2" d="M154 46 C 202 42, 250 38, 296 35"/>
+      <path class="halo d3" d="M84 60 C 120 56, 160 52, 214 49"/><path class="streak d3" d="M88 60 C 122 56, 160 52, 210 49"/>
+    </svg>
+    <div class="eyebrow" style="color:var(--board-ink-2)">BLS Leaf Scorer</div>
     <h2 id="wTitle">Welcome</h2>
     <p class="welcome-text">Enter your name or rater ID to start. It is saved with every leaf you rate.</p>
     <label class="label" for="wName" style="color:var(--board-ink)">Your name or rater ID</label>
@@ -884,6 +1069,15 @@ details.method td, details.method th { padding: 6px 4px; border-bottom: 1px soli
     <button class="btn btn-primary" type="submit" id="wStart">Start</button>
     <p class="welcome-note">Sharing one phone? Each person taps their name in the top bar to switch before rating.</p>
   </form>
+</div>
+
+<div class="scanner" id="scanner" hidden role="dialog" aria-modal="true" aria-label="Scan plant label">
+  <video id="scanVideo" playsinline muted></video>
+  <div class="scan-frame"></div>
+  <div class="scan-bar">
+    <span id="scanHint">Point the camera at the plant's QR code or barcode</span>
+    <button class="btn btn-ghost" type="button" id="scanClose" style="color:#eef4ec;border-color:rgba(255,255,255,0.3)">Cancel</button>
+  </div>
 </div>
 
 <div class="toast" id="toast" role="status" hidden></div>
