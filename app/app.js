@@ -9,7 +9,7 @@
 
   var MAX_ANALYSIS_SIDE = 2048; // matches the example images (about 2048 px tall)
   var MAX_STORED_SIDE = 1600;   // photos kept on the phone and uploaded
-  var APP_VERSION = "1.2.0";
+  var APP_VERSION = "1.2.1";
   // Anonymous device count (the developer's counter, connectors/usage/Usage.gs).
   // Empty = nothing is sent. See privacy.html for exactly what is counted.
   var USAGE_URL = "https://script.google.com/macros/s/AKfycbzUnQ7eC_t816pBN90tBbGwrWDVfAyqYfQKaQmKhj63SFir5pnCnEuJ6Q7j5VnPJVGl3g/exec";
@@ -382,12 +382,18 @@
   var markData = null;    // that photo
   var mk = null;          // drawing state while the marker is open
   function setMarkButtons() {
-    $("markLabel").textContent = mark ? "Marked: change the loop" : "Mark around the leaf";
+    $("markLabel").textContent = mark ? (mark.found ? "Leaf marked: change" : "Marked: change the loop") : "Mark around the leaf";
     $("markBtn").classList.toggle("marked", !!mark);
     $("markClear").hidden = !mark;
   }
   function drawRateMark() {
-    drawPhoto($("rateCanvas"), $("rateFrame"), markData);
+    var shown = markData;
+    if (mark && mark.found) {   // the confirmed leaf, lightly tinted green
+      shown = new ImageData(new Uint8ClampedArray(markData.data), markData.width, markData.height);
+      var d = shown.data, roi = mark.found.roi;
+      for (var i = 0, p = 0; i < roi.length; i++, p += 4) if (roi[i]) { d[p] = d[p] * 0.7 + 18; d[p + 1] = d[p + 1] * 0.7 + 69; d[p + 2] = d[p + 2] * 0.7 + 27; }
+    }
+    drawPhoto($("rateCanvas"), $("rateFrame"), shown);
     if (!mark) return;
     var cv = $("rateCanvas"), ctx = cv.getContext("2d"), rotate = markData.height > markData.width * 1.6;
     ctx.save();
@@ -400,10 +406,24 @@
     ctx.strokeStyle = "#e3b53c"; ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2]); ctx.stroke();
     ctx.restore();
   }
+  // tint the found leaf on a canvas that shows the photo at scale s
+  function tintFound(ctx, w, hgt, s, found, alpha) {
+    var img = ctx.getImageData(0, 0, w, hgt), d = img.data, W = markData.width, H = markData.height;
+    for (var y = 0; y < hgt; y++) {
+      var iy = Math.min(H - 1, Math.floor(y / s));
+      for (var x = 0; x < w; x++) {
+        if (!found.roi[iy * W + Math.min(W - 1, Math.floor(x / s))]) continue;
+        var p = (y * w + x) * 4;
+        d[p] = d[p] * (1 - alpha) + 60 * alpha; d[p + 1] = d[p + 1] * (1 - alpha) + 230 * alpha; d[p + 2] = d[p + 2] * (1 - alpha) + 90 * alpha;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
   function markerDraw() {
-    var c = $("markerCanvas"), ctx = c.getContext("2d");
+    var c = $("markerCanvas"), ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(mk.img, 0, 0, c.width, c.height);
+    if (mk.found) tintFound(ctx, c.width, c.height, mk.s, mk.found, 0.5);
     if (mk.path.length < 2) return;
     ctx.beginPath();
     mk.path.forEach(function (p, i) { if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
@@ -422,8 +442,13 @@
     var c = $("markerCanvas");
     c.width = Math.round(markData.width * s); c.height = Math.round(markData.height * s);
     c.style.width = c.width + "px"; c.style.height = c.height + "px";
-    mk = { img: tmp, s: s, path: mark ? mark.poly.map(function (p) { return { x: p.x * s, y: p.y * s }; }) : [], closed: !!mark, drawing: false };
+    mk = { img: tmp, s: s, path: mark ? mark.poly.map(function (p) { return { x: p.x * s, y: p.y * s }; }) : [], closed: !!mark, drawing: false,
+      poly: mark ? mark.poly : null, found: mark ? mark.found || null : null };
     $("markerUse").disabled = !mk.closed;
+    $("markerUse").textContent = mk.found ? "Looks right" : "Find the leaf";
+    $("markerTitle").textContent = mk.found ? "Check the leaf outline" : "Draw a loop around the leaf";
+    $("markerRedo").textContent = mk.found ? "Draw again" : "Clear";
+    $("markerRedo").disabled = false;
     $("markerHint").textContent = "Keep other leaves, hands and labels outside the loop.";
     markerDraw();
   }
@@ -436,8 +461,9 @@
     if (!mk) return;
     ev.preventDefault();
     try { $("markerCanvas").setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
-    mk.path = [markerPoint(ev)]; mk.closed = false; mk.drawing = true;
-    $("markerUse").disabled = true;
+    mk.path = [markerPoint(ev)]; mk.closed = false; mk.drawing = true; mk.found = null;
+    $("markerTitle").textContent = "Draw a loop around the leaf";
+    $("markerUse").disabled = true; $("markerUse").textContent = "Find the leaf"; $("markerRedo").textContent = "Clear";
     markerDraw();
   });
   $("markerCanvas").addEventListener("pointermove", function (ev) {
@@ -458,19 +484,54 @@
       return;
     }
     mk.closed = true; $("markerUse").disabled = false; buzz(10);
-    $("markerHint").textContent = "Happy with it? Tap Use this area, or draw again.";
+    $("markerHint").textContent = "Tap Find the leaf, or draw the loop again.";
     markerDraw();
   }
   $("markerCanvas").addEventListener("pointerup", endMarkStroke);
   $("markerCanvas").addEventListener("pointercancel", endMarkStroke);
-  $("markerRedo").addEventListener("click", function () { if (!mk) return; mk.path = []; mk.closed = false; $("markerUse").disabled = true; markerDraw(); });
+  $("markerRedo").addEventListener("click", function () {
+    if (!mk) return;
+    mk.path = []; mk.closed = false; mk.found = null;
+    $("markerUse").disabled = true; $("markerUse").textContent = "Find the leaf"; $("markerRedo").textContent = "Clear";
+    $("markerHint").textContent = "Draw one loop around the leaf.";
+    $("markerTitle").textContent = "Draw a loop around the leaf";
+    markerDraw();
+  });
   $("markerCancel").addEventListener("click", closeMarker);
+  // Two steps: "Find the leaf" runs the leaf finder on the marked area at once and shows
+  // the outline it found (green); "Looks right" keeps it, so locking the rating needs no wait.
+  // Only the outline is shown, never a score, so the rating stays blind.
   $("markerUse").addEventListener("click", function () {
     if (!mk || !mk.closed) return;
-    var s = mk.s;
-    mark = { poly: mk.path.map(function (p) { return { x: p.x / s, y: p.y / s }; }) };
-    closeMarker(); setMarkButtons(); drawRateMark();
-    toast("The app will look for the leaf only inside your loop");
+    if (mk.found) {   // second tap: the rater accepts the outline
+      mark = { poly: mk.poly, found: mk.found };
+      closeMarker(); setMarkButtons(); drawRateMark();
+      toast("Leaf outline kept. Now rate the leaf.");
+      return;
+    }
+    var s = mk.s, mine = mk;
+    mk.poly = mk.path.map(function (p) { return { x: p.x / s, y: p.y / s }; });
+    $("markerUse").disabled = true; $("markerRedo").disabled = true;
+    $("markerHint").textContent = "Finding the leaf inside your loop…" + (segModule && segModule.isLoaded() ? "" : " (the first time, the leaf finder downloads once)");
+    findLeafInMark(markData, { poly: mk.poly }).then(function (step) {
+      if (mk !== mine) return;
+      $("markerRedo").disabled = false;
+      if (!step.found) {
+        $("markerHint").textContent = "No leaf found inside this loop. Draw it again, a little wider around the leaf.";
+        return;
+      }
+      mk.found = step.found;
+      markerDraw();
+      $("markerUse").disabled = false; $("markerUse").textContent = "Looks right";
+      $("markerRedo").textContent = "Draw again";
+      $("markerTitle").textContent = "Check the leaf outline";
+      $("markerHint").textContent = "Green = the leaf the app found. Looks right? Otherwise draw again.";
+      buzz(15);
+    }, function () {
+      if (mk !== mine) return;
+      $("markerRedo").disabled = false;
+      $("markerHint").textContent = "The leaf finder could not run. Draw again or tap Cancel.";
+    });
   });
   $("markBtn").addEventListener("click", openMarker);
   $("markClear").addEventListener("click", function () { mark = null; setMarkButtons(); drawRateMark(); });
@@ -694,6 +755,8 @@
     $("busyText").textContent = text;
   }
   function findLeaf(data, m) {
+    // the outline the rater already confirmed on the marking screen
+    if (m && m.found && data === markData) return Promise.resolve({ found: m.found });
     if (m && m.poly && m.poly.length >= 3) {
       busyText("Finding the leaf…", "Looking only inside the area you marked");
       return findLeafInMark(data, m);
